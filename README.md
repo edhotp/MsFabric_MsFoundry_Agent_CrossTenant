@@ -4,12 +4,6 @@ Repositori ini berisi **proposal arsitektur, alternatif solusi, dan rencana demo
 
 ---
 
-## ⚠️ Disclaimer
-
-Dokumen-dokumen di sini adalah **proposal teknis independen**, **bukan dokumentasi resmi Microsoft**. Layanan yang dirujuk (Microsoft Fabric Data Agent, Azure AI Foundry, Microsoft Agent Framework) sebagian masih berstatus *preview* per Mei 2026 dan dapat berubah sewaktu-waktu. Selalu validasi ulang ke [Microsoft Learn](https://learn.microsoft.com/) sebelum implementasi produksi. Lihat bagian **Disclaimer** di setiap dokumen untuk catatan lengkap.
-
----
-
 ## Konteks Singkat
 
 - **Tenant A** — host **Microsoft Fabric** (workspace, Power BI semantic model, Microsoft Fabric Data Agent).
@@ -69,6 +63,6 @@ Repositori ini bersifat dokumentatif. Pertanyaan, koreksi teknis, dan saran peny
 
 ## Lisensi
 
-Konten dokumentasi ini disediakan **apa adanya (as-is)** tanpa jaminan apa pun, baik tersurat maupun tersirat. Pembaca menggunakan informasi ini atas risiko sendiri. Lihat *disclaimer* lengkap di [proposal-agent-manager-cross-tenant.md](proposal-agent-manager-cross-tenant.md).
+Konten dokumentasi ini disediakan **apa adanya (as-is)** tanpa jaminan apa pun, baik tersurat maupun tersirat. Pembaca menggunakan informasi ini atas risiko sendiri.
 
 Seluruh nama produk Microsoft (Microsoft Fabric, Power BI, Azure OpenAI, Microsoft Foundry, Microsoft Entra, Azure AI, dll.) adalah merek dagang Microsoft Corporation. Penggunaan nama-nama tersebut dalam dokumen ini semata-mata untuk tujuan referensi teknis.

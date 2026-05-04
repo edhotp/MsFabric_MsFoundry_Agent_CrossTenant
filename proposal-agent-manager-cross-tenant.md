@@ -1,19 +1,5 @@
 # Proposal: Agent Manager untuk Memanggil Microsoft Fabric Data Agent & Azure AI Foundry Agent (Cross Tenant)
 
-> ## ⚠️ Disclaimer
->
-> Dokumen ini adalah **proposal teknis independen** dan **bukan dokumentasi resmi Microsoft**. Tujuannya adalah membantu tim teknis memahami opsi arsitektur untuk skenario lintas-tenant antara Microsoft Fabric dan Azure AI Foundry.
->
-> Hal-hal yang perlu diperhatikan sebelum mengimplementasikan:
->
-> 1. **Layanan dapat berubah.** Microsoft Fabric Data Agent, Azure AI Foundry, dan Microsoft Agent Framework masih aktif dikembangkan; sebagian fitur masih berstatus *preview*. *Endpoint*, format respons, kelas Software Development Kit (SDK), bahkan persyaratan autentikasi dapat berubah sewaktu-waktu. **Selalu validasi ulang ke [Microsoft Learn](https://learn.microsoft.com/) versi terbaru** sebelum implementasi produksi.
-> 2. **Sampel kode bersifat ilustratif.** Contoh kode Python di dokumen ini telah divalidasi terhadap *Microsoft Agent Framework Python 1.0.0rc6 (Januari 2026)* dan *Microsoft Authentication Library (MSAL) Python* per Mei 2026, namun tetap perlu disesuaikan dengan konteks, kebijakan keamanan, dan kebutuhan organisasi Anda.
-> 3. **Bukan jaminan dukungan resmi.** Skema On-Behalf-Of lintas tenant memerlukan konfigurasi tambahan di kedua tenant (multi-tenant *Application Registration*, *admin consent*, *Cross-Tenant Access Settings*, user *guest*). Jika salah satu prasyarat tidak terpenuhi, alur dapat gagal — dan tidak semua kombinasi dijamin disupport oleh Microsoft Support.
-> 4. **Tanggung jawab keamanan & compliance.** Penerapan di lingkungan produksi adalah tanggung jawab pembaca. Tinjau ulang aspek *Conditional Access*, *Data Loss Prevention*, *audit logging*, *secret management*, serta peraturan privasi data (mis. GDPR, UU PDP) yang berlaku di organisasi Anda.
-> 5. **Tidak ada afiliasi.** Penulis bukan perwakilan resmi Microsoft. Seluruh nama produk, logo, dan merek dagang adalah milik pemilik masing-masing.
->
-> **Disarankan**: lakukan *Proof of Concept* terbatas dengan tim Identity, Data Platform, dan Security organisasi Anda sebelum melakukan *roll-out* lebih luas.
-
 ---
 
 ## 1. Latar Belakang
