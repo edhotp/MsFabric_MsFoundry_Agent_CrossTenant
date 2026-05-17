@@ -2,7 +2,7 @@
 
 > Dokumen ini adalah **rencana implementasi MVP** untuk mendemokan integrasi **Microsoft Fabric Data Agent (Tenant A)** ↔ **Microsoft Agent Framework + Azure OpenAI (Tenant B)** dengan user lintas tenant (Tenant B user sebagai *guest* di Tenant A). Sengaja dibuat **sesederhana mungkin** namun **100% selaras** dengan [proposal-agent-manager-cross-tenant.md (v1.4)](proposal-agent-manager-cross-tenant.md) dan Microsoft Learn.
 >
-> **Status:** Draft v1.1 — Mei 2026
+> **Status:** Draft v1.2 — Mei 2026
 
 ---
 
@@ -204,33 +204,44 @@ pydantic-settings==2.6.*
 
 > **Catatan pilihan SDK:** MS Learn juga menyediakan paket [`fabric-data-agent-client`](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python) untuk konsumsi eksternal, namun SDK tersebut mengikat ke `azure-identity.TokenCredential` (mis. `InteractiveBrowserCredential`). Karena MVP ini sudah mengakuisisi token via **MSAL Confidential Client di sisi server** (web app pattern), pola **subclass `OpenAI`** dengan injeksi header `Authorization: Bearer <token>` dari [Fabric end-to-end tutorial — *Use the Fabric data agent programmatically*](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial#use-the-fabric-data-agent-programmatically) jauh lebih lurus dan minim *moving parts*. Selalu boleh migrasi ke `fabric-data-agent-client` di Fase 3 jika dibutuhkan.
 
-### 6.3 `.env.example`
+### 6.3 Konfigurasi — single `.env` file
+
+**Sumber kebenaran:** [`demo/.env.example`](demo/.env.example) — satu file untuk **semua** parameter (7 section: Tenant A, App Reg, Fabric Data Agent, Azure OpenAI, Server, Session, Logging). Komentar penjelas + tip default sudah disertakan di file tersebut.
+
+**Cara pakai:**
+
+```pwsh
+cd demo
+Copy-Item .env.example .env
+# Edit .env, isi nilai <...>
+```
+
+**Ringkasan variabel wajib** (default-OK tidak ditampilkan — lihat file untuk daftar lengkap):
 
 ```bash
-# === Tenant A (Fabric host) ===
-TENANT_A_ID=00000000-0000-0000-0000-000000000000
+# Tenant A (Fabric host)
+TENANT_A_ID=<guid-tenant-A>
 
-# === Multi-tenant Application Registration (didaftar di Tenant B) ===
-APP_CLIENT_ID=11111111-1111-1111-1111-111111111111
-APP_CLIENT_SECRET=<dari Entra App Reg → Certificates & secrets>
-APP_REDIRECT_URI=http://localhost:8000/auth/callback
+# Multi-tenant App Registration (didaftar di Tenant B)
+APP_CLIENT_ID=<guid-application-(client)-id>
+APP_CLIENT_SECRET=<paste-dari-Certificates-&-secrets>
 
-# === Microsoft Fabric Data Agent (Tenant A) ===
-# Copy nilai dari Fabric portal: Data Agent → Settings → "Published URL"
-# (format URL bervariasi per environment & region — MS Learn tidak mengikat format konkret;
-#  contoh placeholder: https://<environment>.fabric.microsoft.com/groups/<workspace_id>/aiskills/<artifact_id>)
-FABRIC_AGENT_PUBLISHED_URL=<paste-published-base-url-dari-Fabric-portal>
-FABRIC_WORKSPACE_ID=<guid-dari-URL-portal>
-FABRIC_AGENT_ID=<artifact-id-dari-URL-portal>
+# Fabric Data Agent (copy dari Fabric portal → Data Agent → Published URL)
+FABRIC_AGENT_PUBLISHED_URL=<paste-Published-URL-lengkap>
+FABRIC_WORKSPACE_ID=<guid-workspace>
+FABRIC_AGENT_ID=<guid-artifact-id>
 
-# === Azure OpenAI (Tenant B) ===
-AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com
-AZURE_OPENAI_DEPLOYMENT=gpt-4.1
-AZURE_OPENAI_API_VERSION=2024-10-21
+# Azure OpenAI (Tenant B)
+AZURE_OPENAI_ENDPOINT=https://<resource-name>.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT=<nama-deployment-mis-gpt-4.1>
+AZURE_OPENAI_AUTH_MODE=apikey            # atau "azurecli"
+AZURE_OPENAI_API_KEY=<paste-key>         # wajib jika auth_mode=apikey
 
-# === Session ===
-SESSION_SECRET_KEY=<random 32+ char hex string>
+# Session
+SESSION_SECRET_KEY=<random hex 32+ karakter>
 ```
+
+> Variabel operasional lain (`APP_HOST`, `APP_PORT`, `FABRIC_POLL_TIMEOUT_SECONDS`, `SESSION_TTL_MINUTES`, `LOG_LEVEL`, dst.) memiliki default yang aman untuk demo lokal. Tweak hanya jika perlu — semua terdokumentasi di [`demo/.env.example`](demo/.env.example).
 
 ---
 
@@ -285,15 +296,16 @@ fabric_cross_tenant/
 ├── proposal-agent-manager-cross-tenant.md          # existing — sumber arsitektur
 ├── README.md                                        # existing
 ├── demo-mvp-plan.md                                 # ⬅ dokumen ini
-└── demo/                                            # ⬅ dibuat saat Sprint 1
-    ├── README.md                                    # panduan run demo
-    ├── requirements.txt
-    ├── .env.example
+├── .gitignore                                       # ⬅ ada — lindungi .env
+└── demo/                                            # ⬅ parsial: scaffolding awal sudah ada
+    ├── .env.example                                 # ⬅ ada — single source of truth konfigurasi
+    ├── README.md                                    # ⬅ ada — quickstart 3 langkah
+    ├── requirements.txt                             # dibuat saat Sprint 1
     ├── run.sh                                       # `uvicorn app.main:app --reload`
     ├── app/
     │   ├── __init__.py
     │   ├── main.py                                  # FastAPI app + routes
-    │   ├── config.py                                # baca .env dengan pydantic
+    │   ├── config.py                                # baca .env dengan pydantic-settings
     │   ├── auth.py                                  # MSAL Auth Code flow ke Tenant A
     │   ├── session.py                               # in-memory session store
     │   ├── fabric_tool.py                           # ask_fabric_data_agent()
@@ -313,7 +325,7 @@ fabric_cross_tenant/
 
 ### Sprint 0 — Pre-requisites (no code, ~2 jam)
 
-**Output:** `.env` berisi seluruh nilai dari Bagian 6.3 yang terisi.
+**Output:** `demo/.env` (copy dari [`demo/.env.example`](demo/.env.example)) berisi seluruh nilai yang terisi.
 
 **Acceptance:**
 - [ ] App Reg di Tenant B selesai, admin consent di Tenant A sukses
@@ -328,8 +340,8 @@ fabric_cross_tenant/
 **Goal:** User bisa sign-in via browser, token Tenant A tersimpan di session.
 
 **Tasks:**
-1. Inisialisasi project (`demo/` folder, `requirements.txt`, `.env.example`)
-2. `app/config.py` — load `.env` via pydantic-settings
+1. Buat `demo/requirements.txt` (folder `demo/`, `.env.example`, dan `README.md` sudah ada — tinggal tambah `requirements.txt` dan code)
+2. `app/config.py` — load `.env` via pydantic-settings (semua field di Bagian 6.3 → satu kelas `Settings(BaseSettings)`)
 3. `app/session.py` — `SessionStore` class (dict in-memory, TTL 60 menit)
 4. `app/auth.py` — wrapper MSAL `ConfidentialClientApplication` dengan authority Tenant A
 5. `app/main.py` — FastAPI dengan `SessionMiddleware`, routes:
@@ -584,4 +596,4 @@ Setelah MVP terbukti, peningkatan berikut bisa dilakukan secara incremental tanp
 
 ---
 
-*Status dokumen: Draft v1.1 — selaras dengan [proposal v1.4](proposal-agent-manager-cross-tenant.md) dan Microsoft Learn (Mei 2026). Siap dieksekusi.*
+*Status dokumen: Draft v1.2 — selaras dengan [proposal v1.4](proposal-agent-manager-cross-tenant.md) dan Microsoft Learn (Mei 2026). Single-source konfigurasi: [`demo/.env.example`](demo/.env.example). Siap dieksekusi.*
