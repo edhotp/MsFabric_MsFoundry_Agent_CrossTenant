@@ -8,7 +8,7 @@ Repositori ini berisi **proposal arsitektur, alternatif solusi, dan rencana demo
 
 - **Tenant A** — host **Microsoft Fabric** (workspace, Power BI semantic model, Microsoft Fabric Data Agent).
 - **Tenant B** — host **Azure AI Foundry** (Agent Service, model deployment).
-- **Masalah**: Microsoft Fabric Data Agent saat ini **mensyaratkan same-tenant** dengan Foundry, dan **tidak mendukung Service Principal**. Akibatnya, Foundry Agent di Tenant B tidak dapat memanggil Fabric Data Agent di Tenant A meski user sudah berstatus *guest*.
+- **Masalah**: Microsoft Fabric Data Agent ketika dipanggil sebagai *tool* dari **Foundry Agent Service** saat ini **mensyaratkan same-tenant** dengan Foundry, dan pada jalur tersebut **tidak mendukung Service Principal** (wajib *user identity passthrough* / OBO). Akibatnya, Foundry Agent di Tenant B tidak dapat memanggil Fabric Data Agent di Tenant A meski user sudah berstatus *guest*. (Catatan: panggilan **langsung** ke Fabric Data Agent kini mendukung Service Principal sebagai *preview* terpisah — lihat proposal Bagian 1.1.)
 - **Solusi inti**: bangun **Agent Manager** custom (berbasis [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/overview/)) di Tenant B yang melakukan akuisisi token *user-delegated* / *On-Behalf-Of* lintas tenant ke Tenant A, lalu memanggil Microsoft Fabric Data Agent dengan identitas user yang valid.
 
 ---
@@ -17,9 +17,9 @@ Repositori ini berisi **proposal arsitektur, alternatif solusi, dan rencana demo
 
 | Dokumen | Isi | Audiens |
 |---|---|---|
-| [proposal-agent-manager-cross-tenant.md](proposal-agent-manager-cross-tenant.md) | **Proposal utama (v1.3)** — arsitektur lengkap, alur autentikasi On-Behalf-Of lintas tenant, contoh kode Python (Microsoft Agent Framework 1.0.0rc6 + Microsoft Authentication Library), pertimbangan keamanan, topologi *deployment*, *roadmap*, risiko, dan referensi Microsoft Learn. Juga berisi **Daftar Singkatan dan Istilah** lengkap. | Solution Architect, Tech Lead, Security |
+| [proposal-agent-manager-cross-tenant.md](proposal-agent-manager-cross-tenant.md) | **Proposal utama (v1.4)** — arsitektur lengkap, alur autentikasi On-Behalf-Of lintas tenant, contoh kode Python (Microsoft Agent Framework 1.0.0rc6 + Microsoft Authentication Library), pertimbangan keamanan, topologi *deployment*, *roadmap*, risiko, dan referensi Microsoft Learn. Juga berisi **Daftar Singkatan dan Istilah** lengkap. | Solution Architect, Tech Lead, Security |
 
-> Dokumen pendukung lain (alternatif solusi yang lebih sederhana, rencana demo operasional) dapat ditambahkan ke repositori ini di kemudian hari.
+> Dokumen pendukung lain (alternatif solusi yang lebih sederhana berbasis Device Code flow, rencana demo operasional) **direncanakan** dan dapat ditambahkan ke repositori ini di kemudian hari.
 
 ---
 

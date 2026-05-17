@@ -23,6 +23,8 @@ Microsoft Learn secara eksplisit menyatakan persyaratan **same-tenant**:
 
 Skema **On-Behalf-Of** (mekanisme di mana satu layanan menukar token user untuk meminta token baru ke layanan lain dengan identitas user yang sama) yang dilakukan Microsoft Foundry meng-issue token untuk Tenant B, sedangkan Microsoft Fabric Data Agent berada di Tenant A — sehingga token ditolak meskipun user adalah *guest* yang valid.
 
+> **Catatan update preview (Mei 2026):** Sejak preview *service principal authentication for Fabric data agent* ([dokumentasi](https://learn.microsoft.com/fabric/data-science/data-agent-service-principal)), **panggilan langsung** ke Fabric Data Agent **dapat** menggunakan Service Principal (client credentials flow). Namun pada jalur integrasi **Foundry Agent Service → Fabric tool** yang menjadi inti masalah kita, Microsoft tetap mensyaratkan **user identity passthrough (On-Behalf-Of)** dan **belum** mendukung Service Principal maupun Managed Identity. Jadi akar masalah lintas tenant **tidak berubah**: token harus diterbitkan oleh Tenant A atas nama user *guest*, bukan oleh Service Principal di Tenant B.
+
 ---
 
 ## 2. Daftar Singkatan dan Istilah
@@ -96,7 +98,7 @@ Untuk menjaga keterbacaan dokumen, berikut daftar lengkap singkatan/istilah tekn
 | 2 | **Pindahkan Microsoft Fabric ke Tenant B** | Tinggi (migrasi data) | ✅ Ya | Tidak praktis untuk Fabric existing |
 | 3a | **Custom Agent Manager (Microsoft Agent Framework) memanggil Microsoft Fabric Data Agent melalui Model Context Protocol (MCP) server** — Microsoft Fabric Data Agent meng-*expose* dirinya sebagai MCP server (preview) | **Rendah–Medium** | ✅ Ya, sesuai pola resmi MCP + Microsoft Agent Framework | **🎯 Pilihan utama jika Microsoft Foundry tetap di Tenant B** |
 | 3b | Custom Agent Manager melalui **Assistants API published URL** (pola lama) | Medium | ✅ Sesuai SDK resmi | Alternatif jika MCP belum tersedia/diaktifkan |
-| 4 | Service Principal di Tenant A | — | ❌ **Tidak didukung Microsoft Fabric Data Agent** | Tidak boleh dipakai |
+| 4 | Service Principal di Tenant A | — | ⚠️ **Sebagian** — SP didukung untuk **panggilan langsung** ke Fabric Data Agent ([preview](https://learn.microsoft.com/fabric/data-science/data-agent-service-principal)) tetapi **tidak** ketika dipanggil via Foundry Agent Service tool | Tidak boleh dipakai sebagai pengganti user identity di alur Foundry; bisa dipakai untuk pipeline *headless* terpisah |
 
 **Proposal utama:** **Opsi 3a** — *Custom Agent Manager* berbasis **Microsoft Agent Framework** yang mengkonsumsi **Microsoft Fabric Data Agent sebagai MCP (Model Context Protocol) server**. Pendekatan ini menyelaraskan dua kapabilitas resmi:
 - Microsoft Fabric Data Agent dapat di-*expose* sebagai **MCP server** ([dokumentasi](https://learn.microsoft.com/fabric/data-science/data-agent-mcp-server)).
@@ -194,22 +196,23 @@ sequenceDiagram
 ```
 
 **Kunci keberhasilan:**
-- Token diakuisisi dengan parameter `authority=https://login.microsoftonline.com/<TENANT_A_ID>` (artinya “terbitkan token oleh Tenant A”).
-- *Scope*: gunakan **Microsoft Fabric service scope** sesuai [Fabric REST API scopes](https://learn.microsoft.com/rest/api/fabric/articles/scopes), contoh `https://api.fabric.microsoft.com/.default` (atau *scope* spesifik seperti `Item.Execute.All` / `Workspace.Read.All`).
+- Token diakuisisi dengan parameter `authority=https://login.microsoftonline.com/<TENANT_A_ID>` (artinya “terbitkan token oleh Tenant A”). Untuk OBO dengan *guest user*, Microsoft Learn **secara eksplisit** memperingatkan: **jangan** pakai `/common` atau `/organizations` — wajib `tid` Tenant A ([On-Behalf-Of flow — guest users](https://learn.microsoft.com/entra/msal/dotnet/acquiring-tokens/web-apps-apis/on-behalf-of-flow#getting-tokens-on-behalf-of-a-user)).
+- *Scope* untuk **endpoint Fabric Data Agent**: gunakan **Power BI scope** `https://analysis.windows.net/powerbi/api/.default`. Endpoint data agent dibangun di atas layanan Power BI / Analysis Services dan **bukan** memakai Fabric REST API scope. Hal ini dikonfirmasi pada langkah akuisisi token di [Use service principal authentication with Fabric data agent — Step 5](https://learn.microsoft.com/fabric/data-science/data-agent-service-principal#step-5-acquire-a-token-and-call-the-fabric-data-agent). Untuk operasi **Fabric REST API** lain (workspace/items/OneLake), gunakan scope berbeda `https://api.fabric.microsoft.com/.default` sesuai [Fabric REST API scopes](https://learn.microsoft.com/rest/api/fabric/articles/scopes).
 - Application Registration **multi-tenant** + **admin consent (persetujuan admin) di Tenant A**.
 - User **tetap** sebagai *guest* dengan izin Read pada Microsoft Fabric Data Agent + izin **Build** pada Power BI semantic model (Read saja tidak cukup).
 
 > **Catatan validasi (Microsoft Learn):**
 >
-> 1. Microsoft Fabric Data Agent endpoint dibangun di atas pola **OpenAI Assistants API** ([Fabric Data Agent SDK](https://learn.microsoft.com/fabric/data-science/fabric-data-agent-sdk), [Python client SDK](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python)). Bearer token harus *user-delegated* (bukan Service Principal). *Scope* yang tepat dapat dikonfirmasi dengan menangkap header `WWW-Authenticate` dari respons error Fabric atau melihat *scope* yang digunakan oleh paket `fabric-data-agent-sdk`.
+> 1. Microsoft Fabric Data Agent endpoint dibangun di atas pola **OpenAI Assistants API** ([Fabric Data Agent Python SDK in Fabric notebook](https://learn.microsoft.com/fabric/data-science/fabric-data-agent-sdk), [External Python client SDK](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python)). Untuk konsumsi dari aplikasi eksternal, paket resmi adalah **`fabric-data-agent-client`** (lihat [repo `microsoft/fabric_data_agent_client`](https://github.com/microsoft/fabric_data_agent_client)). Bearer token wajib **user-delegated** ketika dipanggil via Foundry; *scope* yang dipakai adalah **`https://analysis.windows.net/powerbi/api/.default`** (Power BI scope) sesuai [Service principal authentication for Fabric data agent — Step 5](https://learn.microsoft.com/fabric/data-science/data-agent-service-principal#step-5-acquire-a-token-and-call-the-fabric-data-agent).
 >
 > 2. **Cross-tenant On-Behalf-Of memiliki batasan**. Agar `acquire_token_on_behalf_of` lintas tenant berhasil, perlu dipenuhi syarat-syarat berikut secara kumulatif:
 >    - Application Registration adalah **multi-tenant** dan service principal-nya sudah **di-provision** di Tenant A (lihat [Cross-tenant authorization with Microsoft Entra](https://learn.microsoft.com/azure/azure-signalr/signalr-howto-authorize-cross-tenant)).
 >    - **Admin consent eksplisit di Tenant A** untuk seluruh delegated permission yang dipakai aplikasi.
 >    - **Cross-Tenant Access Settings inbound** di Tenant A mengizinkan aplikasi ini.
 >    - User adalah *guest* aktif di Tenant A.
+>    - Authority **harus** menggunakan `tid` Tenant A (jangan `/common`/`/organizations`), sesuai panduan resmi [OBO untuk guest users](https://learn.microsoft.com/entra/msal/dotnet/acquiring-tokens/web-apps-apis/on-behalf-of-flow#getting-tokens-on-behalf-of-a-user).
 >
->    Bila salah satu syarat tidak terpenuhi dan OBO ditolak, opsi *fallback* yang divalidasi adalah: gunakan **Authorization Code flow** atau **Device Code flow** dengan `authority=https://login.microsoftonline.com/<TENANT_A_ID>` sehingga user sign-in langsung ke Tenant A. Pola ini juga didokumentasikan pada file alternatif [alternative-simple-agent-manager.md](alternative-simple-agent-manager.md).
+>    Bila salah satu syarat tidak terpenuhi dan OBO ditolak, opsi *fallback* yang divalidasi adalah: gunakan **Authorization Code flow** atau **Device Code flow** dengan `authority=https://login.microsoftonline.com/<TENANT_A_ID>` sehingga user sign-in langsung ke Tenant A. Dokumen alternatif yang membahas pola ini direncanakan namun **belum tersedia** di repo saat ini.
 
 ---
 
@@ -235,7 +238,8 @@ sequenceDiagram
 - **Application Registration** (di Tenant B) bertipe **multi-tenant** dengan:
   - Redirect URI Agent Manager.
   - Delegated API permissions:
-    - `https://api.fabric.microsoft.com/.default` (untuk Microsoft Fabric Data Agent)
+    - **Power BI Service** → `https://analysis.windows.net/powerbi/api/.default` (untuk endpoint Microsoft Fabric Data Agent). Catatan: meskipun produknya disebut "Fabric", endpoint Data Agent diautentikasi terhadap resource Power BI / Analysis Services — bukan Fabric REST API. Lihat [Service principal auth for Fabric data agent](https://learn.microsoft.com/fabric/data-science/data-agent-service-principal#step-5-acquire-a-token-and-call-the-fabric-data-agent).
+    - (Opsional, untuk Fabric REST API lain seperti workspace/items/OneLake) `https://api.fabric.microsoft.com/.default` sesuai [Fabric REST API scopes](https://learn.microsoft.com/rest/api/fabric/articles/scopes).
     - `https://ai.azure.com/.default` (untuk Microsoft Foundry, jika dipakai)
   - **Admin consent (persetujuan admin)** dilakukan di **Tenant A** oleh Global Administrator Tenant A:
     `https://login.microsoftonline.com/<TENANT_A_ID>/adminconsent?client_id=<APP_ID>`
@@ -295,11 +299,16 @@ def acquire_fabric_token_for_user(user_assertion: str) -> str:
     app = ConfidentialClientApplication(
         client_id=APP_CLIENT_ID,
         client_credential=APP_CLIENT_SECRET,
+        # Untuk guest user, WAJIB target tenant A spesifik (jangan /common atau /organizations).
+        # Sumber: https://learn.microsoft.com/entra/msal/dotnet/acquiring-tokens/web-apps-apis/on-behalf-of-flow#getting-tokens-on-behalf-of-a-user
         authority=f"https://login.microsoftonline.com/{TENANT_A_ID}",
     )
     result = app.acquire_token_on_behalf_of(
         user_assertion=user_assertion,
-        scopes=["https://api.fabric.microsoft.com/.default"],
+        # Power BI scope — endpoint Fabric Data Agent diautentikasi terhadap
+        # resource Power BI / Analysis Services, BUKAN Fabric REST API scope.
+        # Sumber: https://learn.microsoft.com/fabric/data-science/data-agent-service-principal#step-5-acquire-a-token-and-call-the-fabric-data-agent
+        scopes=["https://analysis.windows.net/powerbi/api/.default"],
     )
     if "access_token" not in result:
         raise RuntimeError(f"Token acquisition failed: {result}")
@@ -378,7 +387,7 @@ asyncio.run(main())
 
 #### 7.3.3 Microsoft Fabric Data Agent Tool — Opsi B: melalui Assistants API (fallback)
 
-Gunakan paket **`fabric-data-agent-sdk`** ([referensi](https://learn.microsoft.com/fabric/data-science/fabric-data-agent-sdk)) atau pola **published-URL** ([referensi](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial#use-the-fabric-data-agent-programmatically)). Pola ini dipakai jika Model Context Protocol belum tersedia atau aplikasi membutuhkan kontrol *thread* eksplisit:
+Untuk konsumsi eksternal yang lebih lengkap, gunakan paket **`fabric-data-agent-client`** ([referensi](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python), [repo `microsoft/fabric_data_agent_client`](https://github.com/microsoft/fabric_data_agent_client)). Jika Anda bekerja di dalam Fabric notebook, tersedia juga paket **`fabric-data-agent-sdk`** ([referensi](https://learn.microsoft.com/fabric/data-science/fabric-data-agent-sdk)). Atau pakai pola **published-URL** ([referensi](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial#use-the-fabric-data-agent-programmatically)). Pola published-URL dipakai jika Model Context Protocol belum tersedia atau aplikasi membutuhkan kontrol *thread* eksplisit:
 
 ```python
 from openai import OpenAI  # Microsoft Fabric Data Agent kompatibel dengan Assistants API
@@ -457,7 +466,7 @@ asyncio.run(main())
 
 > **Catatan validasi (Mei 2026):**
 > 1. Kelas dan path import berikut dikonfirmasi terhadap dokumentasi Microsoft Learn versi terbaru: `ChatAgent` dari `agent_framework`, `MCPStreamableHTTPTool` dari `agent_framework`, `OpenAIChatCompletionClient` dari `agent_framework.openai`. Versi sebelumnya menggunakan `agent_framework.azure.AzureOpenAIChatClient` yang **sudah dihapus** — lihat [Python 2026 Significant Changes Guide](https://learn.microsoft.com/agent-framework/support/upgrade/python-2026-significant-changes).
-> 2. `acquire_token_on_behalf_of` lintas tenant **memerlukan**: Application Registration multi-tenant + admin consent di Tenant A + *Cross-Tenant Access Settings* inbound yang mengizinkan aplikasi. Bila On-Behalf-Of ditolak, *fallback* ke **Device Code flow** atau **Authorization Code flow interactive** dengan target `tenant=TENANT_A_ID` (lihat [alternative-simple-agent-manager.md](alternative-simple-agent-manager.md)).
+> 2. `acquire_token_on_behalf_of` lintas tenant **memerlukan**: Application Registration multi-tenant + admin consent di Tenant A + *Cross-Tenant Access Settings* inbound yang mengizinkan aplikasi + authority target Tenant A (bukan `/common`). Bila On-Behalf-Of ditolak, *fallback* ke **Device Code flow** atau **Authorization Code flow interactive** dengan `authority=https://login.microsoftonline.com/<TENANT_A_ID>` (dokumen alternatif terpisah direncanakan namun **belum tersedia** di repo saat ini).
 > 3. Gunakan **token cache per-user** (mis. MSAL `SerializableTokenCache` + Azure Cache for Redis) untuk menghindari *prompt sign-in* berulang.
 > 4. Untuk orkestrasi multi-agen (mis. Foundry agent sebagai sub-agent), pertimbangkan pola **Handoff / Sequential / Magentic** dari [Agent Framework Workflows Orchestrations](https://learn.microsoft.com/agent-framework/workflows/orchestrations/handoff).
 > 5. Microsoft Agent Framework Python **tidak** memuat berkas `.env` secara otomatis. Panggil `load_dotenv()` di awal aplikasi atau set environment variable di shell / IDE.
@@ -546,7 +555,7 @@ Arsitektur **Agent Manager berbasis Microsoft Agent Framework di Tenant B** deng
 3. ✅ **Fleksibel** untuk menambah sumber data jamak (Foundry sub-agent, Azure AI Search, REST API internal).
 4. ✅ **Auditable** dengan Microsoft Entra dan Microsoft Fabric Activity Log.
 
-Catatan penting: bila secara organisasi Microsoft Foundry **dapat** dipindah ke Tenant A, itu tetap solusi paling sederhana dan paling terdokumentasi resmi. *Custom* Agent Manager direkomendasikan jika pemisahan tenant adalah kendala bisnis / keamanan yang tidak bisa diubah. Untuk pengguna yang ingin solusi lebih ringan, lihat juga file [alternative-simple-agent-manager.md](alternative-simple-agent-manager.md) yang menyajikan dua alternatif lebih sederhana namun tetap aman.
+Catatan penting: bila secara organisasi Microsoft Foundry **dapat** dipindah ke Tenant A, itu tetap solusi paling sederhana dan paling terdokumentasi resmi. *Custom* Agent Manager direkomendasikan jika pemisahan tenant adalah kendala bisnis / keamanan yang tidak bisa diubah. Dokumen alternatif yang menyajikan pola lebih ringan (mis. Device Code flow tanpa OBO) direncanakan sebagai file terpisah namun **belum tersedia** di repo saat ini.
 
 ---
 
@@ -557,7 +566,9 @@ Catatan penting: bila secara organisasi Microsoft Foundry **dapat** dipindah ke 
 - [Use the Microsoft Fabric data agent (preview) — overview & SDKs](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric)
 - [Fabric Data Agent end-to-end tutorial (programmatic use)](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial#use-the-fabric-data-agent-programmatically)
 - [Consume a Fabric data agent with the Python client SDK](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python)
-- [Fabric Data Agent Python SDK (pip: fabric-data-agent-sdk)](https://learn.microsoft.com/fabric/data-science/fabric-data-agent-sdk)
+- [Fabric Data Agent Python SDK in Fabric notebook (pip: `fabric-data-agent-sdk`)](https://learn.microsoft.com/fabric/data-science/fabric-data-agent-sdk)
+- [Fabric Data Agent external client SDK (pip: `fabric-data-agent-client`)](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python)
+- [Use service principal authentication with Fabric data agent (preview, scope `https://analysis.windows.net/powerbi/api/.default`)](https://learn.microsoft.com/fabric/data-science/data-agent-service-principal)
 - [Configure Fabric data agent tenant settings](https://learn.microsoft.com/fabric/data-science/data-agent-tenant-settings)
 - [Fabric data agent concepts](https://learn.microsoft.com/fabric/data-science/concept-data-agent)
 - [Create a Fabric data agent — authentication & tokens](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent#authentication-and-tokens)
@@ -617,4 +628,4 @@ Catatan penting: bila secara organisasi Microsoft Foundry **dapat** dipindah ke 
 
 ---
 
-*Status dokumen: Draft v1.3 — divalidasi ulang terhadap Microsoft Learn (Mei 2026), siap direview.*
+*Status dokumen: Draft v1.4 — divalidasi ulang terhadap Microsoft Learn (Mei 2026): koreksi scope token ke Power BI scope (`https://analysis.windows.net/powerbi/api/.default`), nuansa klaim Service Principal sesuai preview baru, penambahan referensi paket `fabric-data-agent-client`. Siap direview.*
