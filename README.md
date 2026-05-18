@@ -265,7 +265,7 @@ sequenceDiagram
     AOAI-->>Mgr: assistant message with<br/>tool_call ask_fabric_data_agent(question=…)
     Mgr->>Tool: invoke({"question": "…"})
     Tool->>SDK: client.get_run_details(question,<br/>thread_name=session_id)
-    SDK->>SDK: refresh Fabric token if &lt; 5 min to expiry
+    SDK->>SDK: refresh Fabric token if under 5 min to expiry
     SDK->>Fabric: POST /threads/{id}/messages<br/>+ /threads/{id}/runs
     loop until run.status is terminal
         SDK->>Fabric: GET /threads/{id}/runs/{run_id}
