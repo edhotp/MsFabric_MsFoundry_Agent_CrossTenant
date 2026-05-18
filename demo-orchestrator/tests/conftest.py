@@ -1,0 +1,11 @@
+"""Shared pytest fixtures and path setup for demo-orchestrator tests."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Make `import orchestrator` etc. work when pytest runs from any CWD.
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))

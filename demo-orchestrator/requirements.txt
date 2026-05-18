@@ -1,0 +1,18 @@
+# Microsoft Agent Framework (manager + tool plumbing)
+agent-framework>=1.4.0
+
+# Identity — shared interactive browser sign-in for Fabric + AOAI
+azure-identity>=1.20.0
+
+# Fabric Data Agent calls (Assistants-API surface) + HTTP helper
+openai>=1.65.0
+requests>=2.31.0
+
+# UI + tabular rendering
+streamlit>=1.40.0
+pandas>=2.2.0
+
+# Config + tests
+python-dotenv>=1.0.0
+pytest>=8.0.0
+pytest-asyncio>=0.24.0

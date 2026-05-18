@@ -1,14 +1,21 @@
-# Fabric Data Agent — Cross-Tenant Demo
+# Fabric Data Agent — Cross-Tenant Demos
 
-Minimal Streamlit chat app that lets a user in **Tenant B** talk to a
-**Microsoft Fabric Data Agent** published in **Tenant A**, using interactive
-Microsoft Entra ID sign-in (no service principal, no orchestrator, no
-middle-tier).
+This repository contains **two** progressively-richer Streamlit demos for
+the same cross-tenant scenario: a user in **Tenant B** consuming a
+**Microsoft Fabric Data Agent** published in **Tenant A**, using
+interactive Microsoft Entra ID sign-in (no service principal).
+
+| Folder | What it shows | When to start here |
+|---|---|---|
+| [demo/](demo/) | **Direct** call to the Fabric Data Agent (no orchestrator, no LLM in the middle). ~6 files. | You want the smallest possible reference of the Fabric Data Agent Python SDK + cross-tenant sign-in pattern. |
+| [demo-orchestrator/](demo-orchestrator/) | A **Microsoft Agent Framework manager agent** with the Fabric Data Agent registered as one tool. Azure OpenAI handles tool planning; the same Entra token is reused for both AOAI and Fabric. Includes a 17-test pytest suite. | You want the recommended manager-agent pattern from Microsoft Agent Framework, ready to extend with more tools (Foundry agent, Bing, custom Python, …). |
+
+Both demos can run side-by-side: the simple demo defaults to port **8501**, the orchestrator demo to port **8502**.
 
 The implementation follows the official Microsoft Learn pattern:
 **[Consume a Fabric data agent with the Python client SDK (preview)](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python)**.
 
-> **Preview notice.** Fabric Data Agent and its Python client SDK are in
+> **Preview notice.** Fabric Data Agent, its Python client SDK, and Microsoft Agent Framework are all in
 > [Public Preview](https://learn.microsoft.com/fabric/fundamentals/preview).
 > APIs, endpoints, and behavior may change without notice.
 
@@ -16,7 +23,7 @@ The implementation follows the official Microsoft Learn pattern:
 
 ## What this repo contains
 
-Everything lives in [demo/](demo/):
+### `demo/` — single-agent reference
 
 | File | Purpose |
 |---|---|
@@ -27,7 +34,17 @@ Everything lives in [demo/](demo/):
 | [demo/.env.example](demo/.env.example) | Template for the two required values (`TENANT_ID`, `DATA_AGENT_URL`). |
 | [demo/README.md](demo/README.md) | Step-by-step setup, run, chart rendering, and troubleshooting guide. |
 
-There are **no other files** — the whole demo is ~6 files.
+### `demo-orchestrator/` — manager agent with one tool
+
+| File | Purpose |
+|---|---|
+| [demo-orchestrator/orchestrator.py](demo-orchestrator/orchestrator.py) | Factory that builds a single `agent_framework.Agent` whose only tool today is `ask_fabric_data_agent`. Designed to be extended with more tools later. |
+| [demo-orchestrator/app.py](demo-orchestrator/app.py) | Streamlit chat UI on port **8502** — routes every chat turn through the manager agent. |
+| [demo-orchestrator/chart_utils.py](demo-orchestrator/chart_utils.py) | Vendored verbatim from `demo/`. |
+| [demo-orchestrator/fabric_data_agent_client.py](demo-orchestrator/fabric_data_agent_client.py) | Vendored from `demo/` with one tiny edit: `__init__` accepts `external_credential=` so the same Entra sign-in covers both Fabric and Azure OpenAI. |
+| [demo-orchestrator/tests/](demo-orchestrator/tests/) | Pytest unit tests (17/17 pass, no network). |
+| [demo-orchestrator/requirements.txt](demo-orchestrator/requirements.txt) | Adds `agent-framework`, `pytest`, `pytest-asyncio` on top of the simple demo's deps. |
+| [demo-orchestrator/README.md](demo-orchestrator/README.md) | Full walkthrough, architecture diagram, test guide, and extension recipes. |
 
 ---
 
@@ -146,6 +163,8 @@ project.
 
 ## Quickstart
 
+### Simple demo (no orchestrator)
+
 ```pwsh
 cd c:\mycodes\fabric_cross_tenant\demo
 
@@ -162,10 +181,35 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Open http://localhost:8501, sign in when the browser pops, then chat.
+Open <http://localhost:8501>, sign in when the browser pops, then chat.
 
 For the full walkthrough (where to find `DATA_AGENT_URL`, troubleshooting
 table, sign-out / new-conversation buttons) see [demo/README.md](demo/README.md).
+
+### Orchestrator demo (Microsoft Agent Framework manager)
+
+```pwsh
+cd c:\mycodes\fabric_cross_tenant\demo-orchestrator
+
+# 1. Configure (4 vars: Tenant A + Azure OpenAI)
+Copy-Item .env.example .env
+notepad .env
+
+# 2. Create venv + install deps
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# 3. Run tests (no network)
+python -m pytest tests -v
+
+# 4. Run on port 8502 so both demos can coexist
+python -m streamlit run app.py --server.port=8502
+```
+
+Open <http://localhost:8502>. Full walkthrough, architecture diagram,
+and "how to add more tools" recipes in
+[demo-orchestrator/README.md](demo-orchestrator/README.md).
 
 ---
 
@@ -182,9 +226,13 @@ table, sign-out / new-conversation buttons) see [demo/README.md](demo/README.md)
 
 ## License
 
-`demo/fabric_data_agent_client.py` is a verbatim copy of code from
+[demo/fabric_data_agent_client.py](demo/fabric_data_agent_client.py) and
+[demo-orchestrator/fabric_data_agent_client.py](demo-orchestrator/fabric_data_agent_client.py)
+are based on
 [microsoft/fabric_data_agent_client](https://github.com/microsoft/fabric_data_agent_client),
-published by Microsoft under the [MIT License](https://github.com/microsoft/fabric_data_agent_client/blob/main/LICENSE).
+published by Microsoft under the [MIT License](https://github.com/microsoft/fabric_data_agent_client/blob/main/LICENSE)
+(the orchestrator copy adds a small `external_credential=` parameter to
+the constructor).
 The remaining files in this repository are provided **as-is**, without
 warranty of any kind. Microsoft product names (Microsoft Fabric, Power BI,
 Microsoft Entra, Azure, etc.) are trademarks of Microsoft Corporation and are
