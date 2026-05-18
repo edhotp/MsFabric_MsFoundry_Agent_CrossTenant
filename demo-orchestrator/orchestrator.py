@@ -63,6 +63,10 @@ class OrchestratorConfig:
     data_agent_url: str
     azure_openai_endpoint: str
     azure_openai_deployment: str
+    # Tenant the Foundry resource lives in. ``None`` (the default) lets
+    # the credential resolve the user's home tenant. Set this when
+    # Foundry is in a *different* tenant from ``tenant_id`` (Fabric).
+    llm_tenant_id: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "OrchestratorConfig":
@@ -84,6 +88,9 @@ class OrchestratorConfig:
                 + ", ".join(missing)
                 + ". Copy `.env.example` to `.env` and fill in the values."
             )
+        # Optional — only needed in the cross-tenant Foundry case.
+        llm_tenant = (os.getenv("LLM_TENANT_ID") or "").strip()
+        values["llm_tenant_id"] = llm_tenant or None
         return cls(**values)
 
 
@@ -184,6 +191,7 @@ def build_orchestrator(
     config: OrchestratorConfig,
     credential,
     *,
+    llm_credential=None,
     fabric_client: Optional[FabricDataAgentClient] = None,
     chat_client: Optional[OpenAIChatClient] = None,
     on_fabric_result: Optional[Callable[[FabricToolResult], None]] = None,
@@ -196,8 +204,14 @@ def build_orchestrator(
         config: Resolved configuration (use :meth:`OrchestratorConfig.from_env`
             in the app, or pass a hand-built one in tests).
         credential: An ``azure.identity`` credential signed in to Tenant A.
-            Reused for both the Fabric tool and the Azure OpenAI manager
-            LLM — one browser sign-in covers everything.
+            Used for the Fabric Data Agent call.
+        llm_credential: Optional separate ``azure.identity`` credential used
+            for the Azure AI Foundry chat model. When ``None`` (default), the
+            same ``credential`` is reused — correct only when Foundry lives
+            in the same Entra tenant as the Fabric workspace. In a true
+            cross-tenant setup (Fabric in Tenant A as a guest, Foundry in the
+            user's home tenant) pass a second ``InteractiveBrowserCredential``
+            here so each resource gets a token from its own tenant.
         fabric_client: Override to inject a mock client in tests.
         chat_client: Override to inject a mock chat client in tests.
         on_fabric_result: Optional callback that receives the full result
@@ -212,10 +226,24 @@ def build_orchestrator(
         external_credential=credential,
     )
 
+    llm_credential = llm_credential or credential
+
+    # ``get_bearer_token_provider`` returns a *synchronous* ``Callable[[], str]``.
+    # ``OpenAIChatClient`` with ``base_url=`` routes through OpenAI's
+    # ``AsyncOpenAI`` client whose ``_refresh_api_key`` does
+    # ``await self._api_key_provider()`` — so we wrap the sync provider in
+    # an async function. The framework otherwise hard-codes the classic
+    # ``cognitiveservices.azure.com/.default`` scope when given a raw
+    # ``credential=``, which is wrong for Foundry's ``/openai/v1`` route.
+    sync_token_provider = get_bearer_token_provider(llm_credential, FOUNDRY_SCOPE)
+
+    async def _async_token_provider() -> str:
+        return sync_token_provider()
+
     chat_client = chat_client or OpenAIChatClient(
         model=config.azure_openai_deployment,
         base_url=config.azure_openai_endpoint,
-        api_key=get_bearer_token_provider(credential, FOUNDRY_SCOPE),
+        api_key=_async_token_provider,
     )
 
     fabric_tool = build_fabric_data_agent_tool(

@@ -46,8 +46,8 @@ st.set_page_config(
 st.title("🧭 Fabric Orchestrator — Cross-Tenant Demo")
 st.caption(
     "A Microsoft Agent Framework manager agent that calls a Fabric Data Agent "
-    "in another tenant. Sign in once with your Entra ID account — the same "
-    "token is reused for both Azure OpenAI and Fabric."
+    "in another tenant. Sign in with your Entra ID account — one sign-in for "
+    "Fabric (Tenant A), and one for the Azure AI Foundry tenant."
 )
 
 # --------------------------------------------------------------------------- #
@@ -63,31 +63,51 @@ except RuntimeError as exc:
 # --------------------------------------------------------------------------- #
 # Cached credential + orchestrator (browser opens only on the first call)
 # --------------------------------------------------------------------------- #
-@st.cache_resource(show_spinner="🔐 Opening browser for Entra ID sign-in…")
-def _get_credential(tenant_id: str) -> InteractiveBrowserCredential:
+@st.cache_resource(show_spinner="\U0001F510 Opening browser for Tenant A sign-in (Fabric)…")
+def _get_fabric_credential(tenant_id: str) -> InteractiveBrowserCredential:
+    """Credential bound to Tenant A — used to call the Fabric Data Agent."""
     return InteractiveBrowserCredential(tenant_id=tenant_id)
 
 
-@st.cache_resource(show_spinner="🛠️ Building orchestrator…")
-def _get_orchestrator(_credential, config: OrchestratorConfig):
+@st.cache_resource(show_spinner="\U0001F510 Opening browser for home-tenant sign-in (Foundry)…")
+def _get_llm_credential(tenant_id: str | None = None) -> InteractiveBrowserCredential:
+    """Credential bound to the tenant that owns the Azure AI Foundry resource.
+
+    Pass ``tenant_id`` when Foundry is in a *different* tenant from the
+    Fabric workspace (cross-tenant case). When ``None``, MSAL resolves
+    the user's home tenant. On Windows this typically completes silently
+    via SSO if the user is already signed in to Edge.
+    """
+    if tenant_id:
+        return InteractiveBrowserCredential(tenant_id=tenant_id)
+    return InteractiveBrowserCredential()
+
+
+@st.cache_resource(show_spinner="\U0001F6E0\uFE0F Building orchestrator…")
+def _get_orchestrator(_fabric_credential, _llm_credential, config: OrchestratorConfig):
     # ``_get_last_result`` lives in session state so callbacks can write to
     # it without hashing the orchestrator instance itself.
     def _on_fabric_result(result: FabricToolResult) -> None:
         st.session_state["_last_fabric_result"] = result
 
     agent = build_orchestrator(
-        config, _credential, on_fabric_result=_on_fabric_result
+        config,
+        _fabric_credential,
+        llm_credential=_llm_credential,
+        on_fabric_result=_on_fabric_result,
     )
     return agent
 
 
 try:
-    credential = _get_credential(CONFIG.tenant_id)
-    orchestrator = _get_orchestrator(credential, CONFIG)
+    fabric_credential = _get_fabric_credential(CONFIG.tenant_id)
+    llm_credential = _get_llm_credential(CONFIG.llm_tenant_id)
+    orchestrator = _get_orchestrator(fabric_credential, llm_credential, CONFIG)
 except Exception as exc:  # noqa: BLE001 — surface any setup error
     st.error(f"Initialization failed: {exc}")
-    if st.button("🔁 Retry sign-in"):
-        _get_credential.clear()
+    if st.button("\U0001F501 Retry sign-in"):
+        _get_fabric_credential.clear()
+        _get_llm_credential.clear()
         _get_orchestrator.clear()
         st.rerun()
     st.stop()
@@ -109,11 +129,13 @@ with st.sidebar:
     st.code(CONFIG.tenant_id, language="text")
     st.write("**Data Agent URL**")
     st.code(CONFIG.data_agent_url, language="text")
-    st.write("**Azure OpenAI**")
+    st.write("**Azure AI Foundry**")
     st.code(
         f"{CONFIG.azure_openai_endpoint}\nDeployment: {CONFIG.azure_openai_deployment}",
         language="text",
     )
+    st.write("**Foundry tenant**")
+    st.code(CONFIG.llm_tenant_id or "(home tenant — MSAL default)", language="text")
     st.write("**Conversation thread**")
     st.code(st.session_state.thread_name, language="text")
 
@@ -123,7 +145,8 @@ with st.sidebar:
         st.rerun()
 
     if st.button("🚪 Sign out", use_container_width=True):
-        _get_credential.clear()
+        _get_fabric_credential.clear()
+        _get_llm_credential.clear()
         _get_orchestrator.clear()
         st.session_state.clear()
         st.rerun()
