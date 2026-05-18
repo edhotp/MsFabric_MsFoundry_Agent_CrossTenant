@@ -1,5 +1,7 @@
 # Fabric Data Agent — Cross-Tenant Demos
 
+**Language:** **English** · [Bahasa Indonesia](README.id.md)
+
 This repository contains **two** progressively-richer Streamlit demos for the
 same cross-tenant scenario: a user in **Tenant B** consuming a **Microsoft
 Fabric Data Agent** published in **Tenant A**, using interactive Microsoft
