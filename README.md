@@ -193,8 +193,8 @@ flowchart LR
     FDA[(Fabric Data Agent<br/>in Tenant A)]
 
     U -->|chat message| APP
-    APP -->|asyncio.run(orchestrator.run prompt)| MGR
-    MGR <-->|chat completion<br/>(Entra token)| AOAI
+    APP -->|"asyncio.run(agent.run(prompt))"| MGR
+    MGR <-->|"chat completion<br/>(Entra token)"| AOAI
     MGR -->|tool call when needed| TOOL
     TOOL -->|HTTPS + Bearer token| FDA
     FDA -->|natural-language answer<br/>+ run_details| TOOL
