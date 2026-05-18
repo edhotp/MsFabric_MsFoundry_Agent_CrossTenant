@@ -20,13 +20,14 @@ Everything lives in [demo/](demo/):
 
 | File | Purpose |
 |---|---|
-| [demo/app.py](demo/app.py) | Streamlit chat UI (sign-in gate, sidebar, chat history, per-session thread). |
+| [demo/app.py](demo/app.py) | Streamlit chat UI (sign-in gate, sidebar, chat history, per-session thread, **chart rendering**). |
+| [demo/chart_utils.py](demo/chart_utils.py) | Client-side helpers: extract answer text + a `pandas` DataFrame from the agent's response and render with Streamlit's native charts. See [chart rendering](demo/README.md#chart-rendering) in the demo README. |
 | [demo/fabric_data_agent_client.py](demo/fabric_data_agent_client.py) | Verbatim MIT-licensed copy of the official Microsoft client SDK from [microsoft/fabric_data_agent_client](https://github.com/microsoft/fabric_data_agent_client). One small local edit: `api_key="not-used"` instead of `api_key=""` so the modern OpenAI Python SDK constructor passes its validation (auth is still done via the `Authorization: Bearer …` header). |
-| [demo/requirements.txt](demo/requirements.txt) | `streamlit`, `azure-identity`, `openai`, `requests`, `python-dotenv`. |
+| [demo/requirements.txt](demo/requirements.txt) | `streamlit`, `azure-identity`, `openai`, `requests`, `python-dotenv`, `pandas`. |
 | [demo/.env.example](demo/.env.example) | Template for the two required values (`TENANT_ID`, `DATA_AGENT_URL`). |
-| [demo/README.md](demo/README.md) | Step-by-step setup, run, and troubleshooting guide. |
+| [demo/README.md](demo/README.md) | Step-by-step setup, run, chart rendering, and troubleshooting guide. |
 
-There are **no other files** — the whole demo is ~5 files.
+There are **no other files** — the whole demo is ~6 files.
 
 ---
 

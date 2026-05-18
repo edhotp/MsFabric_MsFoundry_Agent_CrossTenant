@@ -30,11 +30,11 @@ flowchart LR
     APP -->|2. InteractiveBrowserCredential<br/>tenant_id = Tenant A| EA
     U -.->|3. sign in via browser popup| EA
     EA -->|4. user-delegated access token<br/>aud = api.fabric.microsoft.com| APP
-    APP -->|5. client.ask question<br/>Authorization: Bearer …| FDA
+    APP -->|5. client.get_run_details question<br/>Authorization: Bearer …| FDA
     FDA -->|6. NL → SQL / DAX / KQL<br/>as the signed-in user| DS
     DS -->|7. allowed rows only| FDA
-    FDA -->|8. natural-language answer| APP
-    APP -->|9. render in chat UI| U
+    FDA -->|8. answer text + sql_data_previews| APP
+    APP -->|9. render chat + chart| U
 ```
 
 There is **no orchestrator, no Azure OpenAI in Tenant B, no MCP server, no
@@ -49,6 +49,9 @@ MIT-licensed, single Python file) handles:
 - Assistants-API calls to the Fabric Data Agent: create assistant → thread →
   message → run → poll → fetch reply → delete thread.
 - Optional **named threads** for multi-turn conversation persistence.
+
+This app layers a thin **client-side chart renderer** on top of the SDK — see
+[Chart rendering](#chart-rendering) below.
 
 The cross-tenant part works because the credential is created with
 `tenant_id=<Tenant A>` — when the browser opens, the account picker shows any
@@ -82,7 +85,7 @@ sequenceDiagram
     Cred-->>SDK: AccessToken + expires_on
 
     User->>App: Type question in chat
-    App->>SDK: client.ask(prompt, thread_name=session)
+    App->>SDK: client.get_run_details(prompt, thread_name=session)
     SDK->>SDK: refresh token if under 5 min to expiry
     SDK->>Fabric: GET /threads/fabric?tag="thread_name"
     Fabric-->>SDK: existing thread, or create new
@@ -92,9 +95,12 @@ sequenceDiagram
         SDK->>Fabric: GET /threads/{id}/runs/{run_id}
     end
     SDK->>Fabric: GET /threads/{id}/messages
-    Fabric-->>SDK: assistant message
-    SDK-->>App: answer text
-    App-->>User: render in st.chat_message("assistant")
+    SDK->>Fabric: GET /threads/{id}/runs/{run_id}/steps
+    Fabric-->>SDK: assistant message + run_steps + sql_data_previews
+    SDK-->>App: dict { messages, sql_queries, sql_data_previews, … }
+    App->>App: extract_answer_text(run_details)
+    App->>App: extract_dataframe(answer, run_details)
+    App-->>User: chat bubble + optional chart (st.bar_chart / line / area / scatter)
 ```
 
 ---
@@ -103,9 +109,10 @@ sequenceDiagram
 
 | File | Purpose |
 |---|---|
-| [app.py](app.py) | Streamlit chat UI — sign-in gate, sidebar (tenant/URL/thread, new conversation, sign out), chat history, per-session stable thread name. |
+| [app.py](app.py) | Streamlit chat UI — sign-in gate, sidebar (tenant/URL/thread, new conversation, sign out), chat history with **chart rendering**, per-session stable thread name. |
+| [chart_utils.py](chart_utils.py) | Client-side helpers: extract answer text + DataFrame from a run, infer a chart type, and render with Streamlit native charts. See [Chart rendering](#chart-rendering). |
 | [fabric_data_agent_client.py](fabric_data_agent_client.py) | Microsoft's official sample SDK (MIT). See [SDK note](#sdk-note) below for the one tiny local edit. |
-| [requirements.txt](requirements.txt) | `streamlit`, `azure-identity`, `openai`, `requests`, `python-dotenv` (floor-pinned). |
+| [requirements.txt](requirements.txt) | `streamlit`, `azure-identity`, `openai`, `requests`, `python-dotenv`, `pandas` (floor-pinned). |
 | [.env.example](.env.example) | Template with the 2 required values (`TENANT_ID`, `DATA_AGENT_URL`). |
 | `.env` | Your local copy (git-ignored — never commit real values). |
 
@@ -200,6 +207,70 @@ Then in your browser at `http://localhost:8501`:
   history (starts a fresh agent thread on the next message).
 - **🚪 Sign out** — drops the cached credential. The next message re-opens
   the browser sign-in.
+
+---
+
+## Chart rendering
+
+The Fabric Data Agent **does not generate chart images itself**. Per
+[Fabric data agent concepts](https://learn.microsoft.com/fabric/data-science/concept-data-agent),
+the agent uses Azure OpenAI Assistants APIs to translate natural language into
+**SQL / DAX / KQL / Microsoft Graph** queries, executes those queries with the
+caller's identity (read-only), and returns a structured, human-readable
+answer. Image generation (a.k.a. *Code Interpreter*) is **only** available in
+adjacent surfaces — [Microsoft Foundry agents](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/code-interpreter),
+[Copilot Studio prompts](https://learn.microsoft.com/microsoft-copilot-studio/code-interpreter-prompts-examples),
+[Microsoft 365 Copilot extensibility](https://learn.microsoft.com/microsoft-365/copilot/extensibility/code-interpreter)
+— not in the Fabric Data Agent.
+
+**This demo therefore renders charts on the client** from whichever tabular
+shape the agent gives us. Each turn calls
+[`client.get_run_details(prompt, thread_name=…)`](fabric_data_agent_client.py)
+once (single round-trip) and the dict it returns contains, per
+[the MS Learn SDK reference](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python#ask-the-data-agent-a-question):
+
+- `messages` — full Assistants-API message list. We pull the latest assistant
+  text via [`extract_answer_text()`](chart_utils.py).
+- `sql_queries` — every SQL/DAX/KQL the agent ran.
+- `sql_data_previews` — a markdown-formatted preview of each query's rows.
+
+[`extract_dataframe()`](chart_utils.py) then tries, in order:
+
+1. Parse the first GitHub-flavored markdown table inside the assistant's text
+   answer (the most common shape for tabular Lakehouse / Warehouse / KQL
+   questions — the LLM already renders one inline).
+2. Fall back to `sql_data_previews` and parse the first markdown table there.
+
+If a `pandas.DataFrame` is obtained, the chat bubble shows a **📊 Chart**
+expander with a chart-type picker (Auto, Bar, Line, Area, Scatter, Table only).
+[`infer_chart_type()`](chart_utils.py) picks a sensible default:
+
+- ≥1 categorical + ≥1 numeric column → **Bar**
+- only numeric columns, ≥2 → **Scatter**
+- otherwise → **Table only**
+
+Rendering uses Streamlit's built-in charts
+([`st.bar_chart` / `line_chart` / `area_chart` / `scatter_chart`](https://docs.streamlit.io/develop/api-reference/charts))
+with `x` / `y` chosen from the inferred numeric / non-numeric columns. No
+extra plotting library is required.
+
+**Try it.** A prompt like:
+
+> *"Show the top 5 products by revenue last quarter as a markdown table."*
+
+reliably triggers an inline table and therefore an auto-rendered bar chart.
+
+### Limitations
+
+- If the agent's answer contains no markdown table **and** no
+  `sql_data_previews` (e.g. a single-number answer, a free-form summary, or a
+  Power BI semantic-model answer that didn't produce a preview), no chart
+  expander is shown.
+- Numeric coercion strips `,`, `$`, `€`, `%`. Other formats (e.g. `K` / `M`
+  suffixes, ISO dates as the X axis) currently render as strings.
+- Data is parsed from the agent's own preview text. For very wide / very long
+  query results the agent may truncate; in that case the chart reflects the
+  truncated preview, not the full underlying result set.
 
 ---
 

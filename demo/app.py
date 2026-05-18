@@ -17,12 +17,19 @@ from __future__ import annotations
 import os
 import uuid
 
+import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
 # Load TENANT_ID and DATA_AGENT_URL from .env next to this script.
 load_dotenv()
 
+from chart_utils import (
+    CHART_TYPES,
+    extract_answer_text,
+    extract_dataframe,
+    render_chart,
+)
 from fabric_data_agent_client import FabricDataAgentClient
 
 TENANT_ID = os.getenv("TENANT_ID", "").strip()
@@ -106,9 +113,26 @@ with st.sidebar:
 # -----------------------------------------------------------------------------
 # Chat history
 # -----------------------------------------------------------------------------
-for msg in st.session_state.messages:
+def _render_chart_block(msg_index: int, df: pd.DataFrame) -> None:
+    """Show chart-type picker + the chart itself for an assistant message."""
+    with st.expander(f"📊 Chart ({len(df)} rows × {df.shape[1]} cols)", expanded=True):
+        chart_type = st.selectbox(
+            "Chart type",
+            CHART_TYPES,
+            key=f"chart_type_{msg_index}",
+            help="Charts are rendered client-side from the data the Fabric Data Agent returned.",
+        )
+        render_chart(st, df, chart_type)
+        with st.popover("Show data"):
+            st.dataframe(df, use_container_width=True)
+
+
+for idx, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
+        if msg["role"] == "assistant" and msg.get("data_records"):
+            df = pd.DataFrame(msg["data_records"])
+            _render_chart_block(idx, df)
 
 # -----------------------------------------------------------------------------
 # Chat input
@@ -121,10 +145,25 @@ if prompt:
 
     with st.chat_message("assistant"):
         with st.spinner("Asking the data agent…"):
+            answer = ""
+            df: pd.DataFrame | None = None
             try:
-                answer = client.ask(prompt, thread_name=st.session_state.thread_name)
+                # get_run_details returns the answer messages AND any structured
+                # data the agent retrieved (sql_data_previews), in one round-trip.
+                run_details = client.get_run_details(
+                    prompt, thread_name=st.session_state.thread_name
+                )
+                answer = extract_answer_text(run_details)
+                df = extract_dataframe(answer, run_details)
             except Exception as exc:  # noqa: BLE001 — surface tool errors to user
                 answer = f"❌ Error: {exc}"
-        st.markdown(answer)
 
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+        st.markdown(answer)
+        if df is not None and len(df) > 0:
+            _render_chart_block(len(st.session_state.messages), df)
+
+    entry: dict = {"role": "assistant", "content": answer}
+    if df is not None and len(df) > 0:
+        # Store as records (JSON-serializable) so session_state stays clean.
+        entry["data_records"] = df.to_dict(orient="records")
+    st.session_state.messages.append(entry)
