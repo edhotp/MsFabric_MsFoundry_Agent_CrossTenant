@@ -23,6 +23,7 @@ The implementation follows the official Microsoft Learn pattern:
   - [Shared cross-tenant identity model](#shared-cross-tenant-identity-model)
   - [Detailed sequence — auth + one chat turn (simple demo)](#detailed-sequence--auth--one-chat-turn-simple-demo)
   - [Manager-agent architecture (orchestrator demo)](#manager-agent-architecture-orchestrator-demo)
+  - [Detailed sequence — orchestrator chat turn](#detailed-sequence--orchestrator-chat-turn)
 - [Why this is "cross-tenant"](#why-this-is-cross-tenant)
 - [Prerequisites](#prerequisites)
 - [Quickstart](#quickstart)
@@ -218,6 +219,91 @@ Key properties of the orchestrator demo:
 - **The manager pattern keeps the agent code small.** A single
   `Agent(client=…, tools=[fabric_tool])` is the whole orchestrator — see
   [`build_orchestrator`](demo-orchestrator/orchestrator.py).
+
+### Detailed sequence — orchestrator chat turn
+
+This is the orchestrator counterpart of the simple-demo sequence diagram
+above. It shows the full end-to-end path of **one chat turn** through the
+manager agent — from Streamlit, through Microsoft Agent Framework's LLM
+tool-planning, into the Fabric Data Agent, and back to the chart-rendering
+UI. The same `InteractiveBrowserCredential` is used for both Azure OpenAI
+(home tenant) and Fabric (Tenant A).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User (Tenant B guest)
+    participant App as Streamlit (app.py :8502)
+    participant Cred as InteractiveBrowserCredential<br/>tenant_id = Tenant A
+    participant Orch as build_orchestrator()
+    participant Mgr as Manager Agent<br/>(agent_framework.Agent)
+    participant AOAI as Azure OpenAI<br/>(home tenant)
+    participant Tool as ask_fabric_data_agent<br/>(FunctionTool)
+    participant SDK as FabricDataAgentClient<br/>(external_credential=Cred)
+    participant Fabric as Fabric Data Agent<br/>(Tenant A)
+
+    rect rgb(245, 245, 255)
+    note over User,Fabric: Startup — once per session
+    User->>App: Open http://localhost:8502
+    App->>App: load_dotenv() — TENANT_ID, DATA_AGENT_URL,<br/>AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT
+    App->>Cred: InteractiveBrowserCredential(tenant_id=Tenant A)
+    Cred-->>User: Browser sign-in (Entra)
+    User-->>Cred: Pick guest account → consent
+    App->>Orch: build_orchestrator(config, credential,<br/>on_fabric_result=…)
+    Orch->>SDK: FabricDataAgentClient(…, external_credential=Cred)
+    SDK->>Cred: get_token("…/api.fabric.microsoft.com/.default")
+    Orch->>AOAI: AzureOpenAIChatClient(credential=Cred,<br/>scope="…/cognitiveservices.azure.com/.default")
+    Orch->>Mgr: Agent(client=AOAI, tools=[ask_fabric_data_agent])
+    Orch-->>App: agent ready
+    end
+
+    rect rgb(245, 255, 245)
+    note over User,Fabric: One chat turn
+    User->>App: Type question
+    App->>Mgr: asyncio.run(agent.run(prompt, thread=…))
+    Mgr->>AOAI: chat.completions.create<br/>(messages + tool schema)
+    AOAI-->>Mgr: assistant message with<br/>tool_call ask_fabric_data_agent(question=…)
+    Mgr->>Tool: invoke({"question": "…"})
+    Tool->>SDK: client.get_run_details(question,<br/>thread_name=session_id)
+    SDK->>SDK: refresh Fabric token if &lt; 5 min to expiry
+    SDK->>Fabric: POST /threads/{id}/messages<br/>+ /threads/{id}/runs
+    loop until run.status is terminal
+        SDK->>Fabric: GET /threads/{id}/runs/{run_id}
+    end
+    SDK->>Fabric: GET /messages + /runs/{run_id}/steps
+    Fabric-->>SDK: assistant text + sql_data_previews
+    SDK-->>Tool: run_details dict
+    Tool->>App: on_result(FabricToolResult)<br/>— stashes run_details for chart
+    Tool-->>Mgr: answer text (string)
+    Mgr->>AOAI: chat.completions.create<br/>(adds tool result to messages)
+    AOAI-->>Mgr: final natural-language reply
+    Mgr-->>App: AgentRunResponse(text)
+    App->>App: extract_dataframe(reply,<br/>stashed run_details)
+    App-->>User: chat bubble + optional 📊 chart
+    end
+```
+
+Notes on the flow:
+
+- **Steps 1–11 happen once per session.** Subsequent chat turns reuse the
+  same `Agent`, `FabricDataAgentClient`, and credential — the SDK
+  auto-refreshes tokens 5 min before expiry.
+- **Two scopes, one credential** (steps 8 and 10). Fabric uses
+  `https://api.fabric.microsoft.com/.default`; Azure OpenAI uses
+  `https://cognitiveservices.azure.com/.default`. Both are signed in
+  against Tenant A, but Azure OpenAI must be in the user's home tenant
+  with **Cognitive Services OpenAI User** role granted to the user.
+- **The LLM is called twice per turn** (steps 14 and 26): once to *plan*
+  the tool call, once to *summarize* the tool's answer. If the LLM
+  decides no tool is needed (e.g. for small-talk or follow-up questions
+  answerable from history) it returns the final reply on the first call
+  and the Fabric round-trip is skipped entirely.
+- **`on_result` runs inside the tool** (step 22), *before* the answer
+  goes back to the LLM. That is what makes chart rendering possible —
+  the raw `run_details` (with `sql_data_previews`) is captured for the
+  Streamlit layer even though the LLM only sees the text summary.
+- **`thread_name=session_id`** keeps each browser session on its own
+  Fabric thread, so multi-turn questions retain context server-side.
 
 ---
 
