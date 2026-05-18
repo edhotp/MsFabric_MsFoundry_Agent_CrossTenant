@@ -81,11 +81,33 @@ already consented in most tenants for the Microsoft Fabric scope.
 
 ## Why this is "cross-tenant"
 
-Microsoft Fabric Data Agents currently **do not support a Service Principal**
-on the user-identity call path — they require an end-user token (see the
-authentication notes in
-[Consume a Fabric data agent with the Python client SDK](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python)).
-This demo solves the cross-tenant problem the simplest possible way:
+Microsoft Fabric Data Agents now support **two** identity types on the
+call path (both in preview):
+
+1. The **end user** signed in with Microsoft Entra ID — see
+   [Consume a Fabric data agent with the Python client SDK](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python).
+2. A **service principal** — see
+   [Use service principal authentication with Fabric data agent](https://learn.microsoft.com/fabric/data-science/data-agent-service-principal)
+   (added in May 2026; **not yet supported** for data agents backed by a
+   KQL database).
+
+This demo intentionally uses option **(1)** for the cross-tenant case
+because:
+
+- The Tenant A data agent and its data sources enforce permissions per the
+  *calling* Microsoft Entra identity. Using each user's own token preserves
+  row-level security, sensitivity labels, and audit trails *as that user*
+  in Tenant A.
+- A service principal would be a single shared, non-interactive identity —
+  not the actual end user. It also requires the Tenant A admin to register
+  an app (or accept a multi-tenant one), enable
+  **"Service principals can use Fabric APIs"**, and grant it Member /
+  Contributor on the workspace plus read on every data source. That is the
+  right pattern for *automation*, not for "a Tenant B human asks a question".
+- Skipping server-to-server token exchange means no app registration, no
+  secret management, and no middle-tier in Tenant B at all.
+
+How it works in this demo:
 
 - Skip server-to-server token exchange entirely.
 - Sign the user in **directly to Tenant A** with their guest account.
