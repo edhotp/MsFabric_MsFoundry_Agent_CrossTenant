@@ -10,9 +10,13 @@ to ``tools=[…]`` inside :func:`build_orchestrator`.
 Design notes — Microsoft Agent Framework patterns used here
 -----------------------------------------------------------
 - The manager LLM is reached through
-  ``agent_framework.openai.OpenAIChatClient`` configured for **Azure
-  OpenAI** (Entra ID auth, no API keys). See
-  https://learn.microsoft.com/agent-framework/overview/agent-framework-overview
+  ``agent_framework.openai.OpenAIChatClient`` configured for the
+  **Azure AI Foundry v1 OpenAI endpoint** (Entra ID auth, no API keys).
+  We pass the full ``.../openai/v1`` URL as ``base_url`` and use
+  ``azure.identity.get_bearer_token_provider`` with the
+  ``https://ai.azure.com/.default`` scope so the same browser sign-in
+  used for Fabric also satisfies the model call.
+  See https://learn.microsoft.com/agent-framework/overview/agent-framework-overview
 - Tools are plain Python functions decorated with ``@agent_framework.tool``.
   The framework inspects the function signature + docstring to build the
   JSON schema the LLM uses to call the tool.
@@ -31,9 +35,16 @@ from typing import Callable, Optional, Sequence
 
 from agent_framework import Agent, FunctionTool, tool
 from agent_framework.openai import OpenAIChatClient
+from azure.identity import get_bearer_token_provider
 
 from chart_utils import extract_answer_text, extract_dataframe
 from fabric_data_agent_client import FabricDataAgentClient
+
+# Microsoft Entra scope to request for the Azure AI Foundry v1 OpenAI
+# endpoint (``*.services.ai.azure.com/openai/v1``). For classic
+# Azure-OpenAI-resource endpoints (``*.openai.azure.com``) the scope is
+# ``https://cognitiveservices.azure.com/.default`` instead.
+FOUNDRY_SCOPE = "https://ai.azure.com/.default"
 
 # --------------------------------------------------------------------------- #
 # Public configuration
@@ -52,7 +63,6 @@ class OrchestratorConfig:
     data_agent_url: str
     azure_openai_endpoint: str
     azure_openai_deployment: str
-    azure_openai_api_version: str = "2024-12-01-preview"
 
     @classmethod
     def from_env(cls) -> "OrchestratorConfig":
@@ -74,10 +84,6 @@ class OrchestratorConfig:
                 + ", ".join(missing)
                 + ". Copy `.env.example` to `.env` and fill in the values."
             )
-        values["azure_openai_api_version"] = (
-            os.getenv("AZURE_OPENAI_API_VERSION", "").strip()
-            or "2024-12-01-preview"
-        )
         return cls(**values)
 
 
@@ -208,9 +214,8 @@ def build_orchestrator(
 
     chat_client = chat_client or OpenAIChatClient(
         model=config.azure_openai_deployment,
-        azure_endpoint=config.azure_openai_endpoint,
-        api_version=config.azure_openai_api_version,
-        credential=credential,
+        base_url=config.azure_openai_endpoint,
+        api_key=get_bearer_token_provider(credential, FOUNDRY_SCOPE),
     )
 
     fabric_tool = build_fabric_data_agent_tool(
@@ -229,6 +234,7 @@ def build_orchestrator(
 
 
 __all__ = [
+    "FOUNDRY_SCOPE",
     "FabricToolResult",
     "MANAGER_INSTRUCTIONS",
     "OrchestratorConfig",

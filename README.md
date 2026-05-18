@@ -45,7 +45,7 @@ The implementation follows the official Microsoft Learn pattern:
 | Folder | What it shows | Start here when… |
 |---|---|---|
 | [demo/](demo/) | **Direct** call to the Fabric Data Agent (no LLM in the middle). ~6 files. | You want the smallest possible reference of the Fabric Data Agent Python SDK + the cross-tenant sign-in pattern. |
-| [demo-orchestrator/](demo-orchestrator/) | A **Microsoft Agent Framework "manager" agent** with the Fabric Data Agent registered as one tool. Azure OpenAI handles tool planning; the same Entra token is reused for both Azure OpenAI and Fabric. Includes a 17-test pytest suite. | You want the recommended manager-agent pattern from Microsoft Agent Framework, ready to extend with more tools (Foundry agent, Bing, custom Python, …). |
+| [demo-orchestrator/](demo-orchestrator/) | A **Microsoft Agent Framework "manager" agent** with the Fabric Data Agent registered as one tool. Azure AI Foundry handles tool planning; the same Entra token is reused for both the Foundry model and Fabric. Includes a 16-test pytest suite. | You want the recommended manager-agent pattern from Microsoft Agent Framework, ready to extend with more tools (Foundry agent, Bing, custom Python, …). |
 
 Both demos can run side-by-side: the simple demo defaults to port **8501**,
 the orchestrator demo to port **8502**.
@@ -71,7 +71,7 @@ the orchestrator demo to port **8502**.
 | [demo-orchestrator/orchestrator.py](demo-orchestrator/orchestrator.py) | Factory that builds a single `agent_framework.Agent` whose only tool today is `ask_fabric_data_agent`. Designed to be extended with more tools later — see [Extending the orchestrator](#extending-the-orchestrator). |
 | [demo-orchestrator/app.py](demo-orchestrator/app.py) | Streamlit chat UI on port **8502** — routes every chat turn through the manager agent. |
 | [demo-orchestrator/chart_utils.py](demo-orchestrator/chart_utils.py) | Vendored verbatim from `demo/`. |
-| [demo-orchestrator/fabric_data_agent_client.py](demo-orchestrator/fabric_data_agent_client.py) | Vendored from `demo/` with one tiny additional edit: `__init__` accepts `external_credential=` so the same Entra sign-in covers both Fabric and Azure OpenAI. |
+| [demo-orchestrator/fabric_data_agent_client.py](demo-orchestrator/fabric_data_agent_client.py) | Vendored from `demo/` with one tiny additional edit: `__init__` accepts `external_credential=` so the same Entra sign-in covers both Fabric and the Foundry model. |
 | [demo-orchestrator/tests/](demo-orchestrator/tests/) | Pytest unit tests (17/17 pass, no network). See [Tests](#tests). |
 | [demo-orchestrator/pytest.ini](demo-orchestrator/pytest.ini) | Adds `pythonpath = .` so tests can `import orchestrator` from any cwd. |
 | [demo-orchestrator/requirements.txt](demo-orchestrator/requirements.txt) | Adds `agent-framework`, `pytest`, `pytest-asyncio` on top of the simple demo's deps. |
@@ -86,7 +86,7 @@ the orchestrator demo to port **8502**.
 Both demos use the same trick to avoid a service principal or middle-tier:
 the user signs in to Tenant A interactively, and the resulting access token
 is passed straight to the Fabric Data Agent (and, in the orchestrator demo,
-also to Azure OpenAI in the user's home tenant).
+also to the Azure AI Foundry model in the user's home tenant).
 
 ```mermaid
 flowchart LR
@@ -188,7 +188,7 @@ flowchart LR
     U([Your Entra ID account<br/>signed in to Tenant A])
     APP[Streamlit UI<br/>app.py — port 8502]
     MGR[Manager Agent<br/>Microsoft Agent Framework]
-    AOAI[(Azure OpenAI<br/>in your home tenant)]
+    AOAI[(Azure AI Foundry<br/>in your home tenant)]
     TOOL[Tool:<br/>ask_fabric_data_agent]
     FDA[(Fabric Data Agent<br/>in Tenant A)]
 
@@ -207,11 +207,11 @@ Key properties of the orchestrator demo:
 
 - **One sign-in covers everything.** `InteractiveBrowserCredential(tenant_id=<Tenant A>)`
   is created once and reused for both the Fabric scope
-  (`https://api.fabric.microsoft.com/.default`) and the Azure OpenAI scope
-  (`https://cognitiveservices.azure.com/.default`).
-- **The manager LLM is Azure OpenAI in *your* tenant.** Only the Fabric tool
-  reaches across into Tenant A. The user's prompts and the model's
-  tool-call planning never leave the home tenant.
+  (`https://api.fabric.microsoft.com/.default`) and the Azure AI Foundry
+  scope (`https://ai.azure.com/.default`).
+- **The manager LLM is Azure AI Foundry in *your* tenant.** Only the
+  Fabric tool reaches across into Tenant A. The user's prompts and the
+  model's tool-call planning never leave the home tenant.
 - **`run_details` short-circuits the chart path.** The Fabric tool's
   `on_result` callback hands the raw `run_details` dict to the Streamlit
   layer, which calls `chart_utils.extract_dataframe(...)` — the same way
@@ -226,8 +226,8 @@ This is the orchestrator counterpart of the simple-demo sequence diagram
 above. It shows the full end-to-end path of **one chat turn** through the
 manager agent — from Streamlit, through Microsoft Agent Framework's LLM
 tool-planning, into the Fabric Data Agent, and back to the chart-rendering
-UI. The same `InteractiveBrowserCredential` is used for both Azure OpenAI
-(home tenant) and Fabric (Tenant A).
+UI. The same `InteractiveBrowserCredential` is used for both Azure AI
+Foundry (home tenant, `/openai/v1`) and Fabric (Tenant A).
 
 ```mermaid
 sequenceDiagram
@@ -237,7 +237,7 @@ sequenceDiagram
     participant Cred as InteractiveBrowserCredential<br/>tenant_id = Tenant A
     participant Orch as build_orchestrator()
     participant Mgr as Manager Agent<br/>(agent_framework.Agent)
-    participant AOAI as Azure OpenAI<br/>(home tenant)
+    participant AOAI as Azure AI Foundry<br/>(home tenant, /openai/v1)
     participant Tool as ask_fabric_data_agent<br/>(FunctionTool)
     participant SDK as FabricDataAgentClient<br/>(external_credential=Cred)
     participant Fabric as Fabric Data Agent<br/>(Tenant A)
@@ -252,7 +252,7 @@ sequenceDiagram
     App->>Orch: build_orchestrator(config, credential,<br/>on_fabric_result=…)
     Orch->>SDK: FabricDataAgentClient(…, external_credential=Cred)
     SDK->>Cred: get_token("…/api.fabric.microsoft.com/.default")
-    Orch->>AOAI: AzureOpenAIChatClient(credential=Cred,<br/>scope="…/cognitiveservices.azure.com/.default")
+    Orch->>AOAI: OpenAIChatClient(base_url=Foundry v1,<br/>api_key=get_bearer_token_provider(Cred,<br/>scope="…/ai.azure.com/.default"))
     Orch->>Mgr: Agent(client=AOAI, tools=[ask_fabric_data_agent])
     Orch-->>App: agent ready
     end
@@ -289,10 +289,11 @@ Notes on the flow:
   same `Agent`, `FabricDataAgentClient`, and credential — the SDK
   auto-refreshes tokens 5 min before expiry.
 - **Two scopes, one credential** (steps 8 and 10). Fabric uses
-  `https://api.fabric.microsoft.com/.default`; Azure OpenAI uses
-  `https://cognitiveservices.azure.com/.default`. Both are signed in
-  against Tenant A, but Azure OpenAI must be in the user's home tenant
-  with **Cognitive Services OpenAI User** role granted to the user.
+  `https://api.fabric.microsoft.com/.default`; the Foundry v1 OpenAI
+  endpoint uses `https://ai.azure.com/.default`. Both are signed in
+  against Tenant A, but the Foundry resource must be reachable to the
+  signed-in user with a role that grants chat-completion access
+  (e.g. **Azure AI User** or **Cognitive Services User**).
 - **The LLM is called twice per turn** (steps 14 and 26): once to *plan*
   the tool call, once to *summarize* the tool's answer. If the LLM
   decides no tool is needed (e.g. for small-talk or follow-up questions
@@ -340,7 +341,7 @@ How it works in these demos:
 - Skip server-to-server token exchange entirely.
 - Sign the user in **directly to Tenant A** with their guest account.
 - Pass the resulting user token straight to the Fabric Data Agent (and, in
-  the orchestrator demo, also to Azure OpenAI).
+  the orchestrator demo, also to the Azure AI Foundry model).
 
 Result: a Tenant B user gets data from a Tenant A Fabric workspace through
 a local Streamlit app, with no extra Azure infrastructure.
@@ -379,13 +380,15 @@ a local Streamlit app, with no extra Azure infrastructure.
 
 ### Only for the orchestrator demo
 
-8. An **Azure OpenAI resource** in your home tenant with a chat-model
-   deployment (`gpt-4o-mini`, `gpt-4.1-mini`, etc.). Note its endpoint
-   and deployment name.
-9. Your Entra ID account assigned the
-   [**Cognitive Services OpenAI User**](https://learn.microsoft.com/azure/ai-services/openai/how-to/role-based-access-control)
-   role on that Azure OpenAI resource (this is what lets the same user
-   token call Azure OpenAI without an API key).
+8. An **Azure AI Foundry resource** (an Azure AI Services account, host
+   name `*.services.ai.azure.com`) with a chat-model deployment
+   (`gpt-5.4-mini`, `gpt-4o-mini`, `gpt-4.1`, etc.). The orchestrator
+   uses the **v1 OpenAI endpoint** of that resource — the URL must end
+   with `/openai/v1`.
+9. Your Entra ID account has a role on that Foundry resource that lets
+   you call model deployments (e.g. **Azure AI User**, **Cognitive
+   Services User**, or higher). See
+   [Azure AI services RBAC](https://learn.microsoft.com/azure/ai-services/role-based-access-control).
 
 That's it. No app registration, no Key Vault, no Container Apps, no
 Foundry project.
@@ -426,7 +429,7 @@ Open <http://localhost:8501>, sign in when the browser pops, then chat.
 ```pwsh
 cd c:\mycodes\fabric_cross_tenant\demo-orchestrator
 
-# 1. Configure (4 vars: Tenant A + Azure OpenAI)
+# 1. Configure (4 vars: Tenant A + Azure AI Foundry)
 Copy-Item .env.example .env
 notepad .env
 
@@ -471,14 +474,13 @@ DATA_AGENT_URL=https://api.fabric.microsoft.com/v1/workspaces/<workspace-id>/dat
 TENANT_ID=00000000-0000-0000-0000-000000000000
 DATA_AGENT_URL=https://api.fabric.microsoft.com/v1/workspaces/<workspace-id>/dataagents/<agent-id>/aiassistant/openai
 
-# Azure OpenAI in your home tenant
-AZURE_OPENAI_ENDPOINT=https://<your-aoai-resource>.openai.azure.com
-AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
-AZURE_OPENAI_API_VERSION=2024-12-01-preview   # optional; default shown
+# Azure AI Foundry v1 OpenAI endpoint (must end with /openai/v1)
+AZURE_OPENAI_ENDPOINT=https://<your-foundry-resource>.services.ai.azure.com/openai/v1
+AZURE_OPENAI_DEPLOYMENT=gpt-5.4-mini
 ```
 
 `AZURE_OPENAI_DEPLOYMENT` is the **deployment name** (what you named it in
-Azure AI Foundry / Azure OpenAI Studio), *not* the underlying model name.
+Azure AI Foundry), *not* the underlying model name.
 
 ### Where to find the values
 
@@ -486,9 +488,10 @@ Azure AI Foundry / Azure OpenAI Studio), *not* the underlying model name.
   **Tenant ID**. Format: GUID.
 - **`DATA_AGENT_URL`** — Fabric portal → open your **published Data
   Agent** → **Settings** → **Published endpoint** → copy the OpenAI URL.
-- **`AZURE_OPENAI_ENDPOINT`** — Azure portal → your Azure OpenAI resource
-  → **Keys and Endpoint** → **Endpoint** (the `https://….openai.azure.com`
-  URL, not the regional URL).
+- **`AZURE_OPENAI_ENDPOINT`** — Azure AI Foundry → your project →
+  **Overview** → **Endpoints** → the **Azure AI Foundry** entry. Take the
+  base URL and append `/openai/v1` (e.g.
+  `https://foundry-zeroquery-poc.services.ai.azure.com/openai/v1`).
 - **`AZURE_OPENAI_DEPLOYMENT`** — Azure AI Foundry → your project →
   **Deployments** → the **deployment name** column.
 
@@ -497,7 +500,7 @@ Azure AI Foundry / Azure OpenAI Studio), *not* the underlying model name.
 ## Tests
 
 Comprehensive unit tests live in [demo-orchestrator/tests/](demo-orchestrator/tests/).
-They mock the Azure OpenAI client and the `FabricDataAgentClient` — no
+They mock the Foundry chat client and the `FabricDataAgentClient` — no
 real network calls are made.
 
 ```pwsh
@@ -505,7 +508,7 @@ cd c:\mycodes\fabric_cross_tenant\demo-orchestrator
 .\.venv\Scripts\python.exe -m pytest tests -v
 ```
 
-Expected output: **17 passed**.
+Expected output: **16 passed**.
 
 What's covered:
 
@@ -627,7 +630,7 @@ token; the `api_key` value is never sent to Fabric.
 
 **`demo-orchestrator/fabric_data_agent_client.py`** has the same edit
 **plus** one extra constructor parameter so the orchestrator can share its
-credential with Azure OpenAI:
+credential with Azure AI Foundry:
 
 ```python
 def __init__(self, tenant_id, data_agent_url, *, external_credential=None):
@@ -704,8 +707,8 @@ See:
 | `AADSTS50020` (user not authorized in tenant) | Your Tenant B account isn't a guest in Tenant A, or you haven't accepted the B2B invitation yet. See [Microsoft Entra B2B](https://learn.microsoft.com/entra/external-id/b2b-quickstart-add-guest-users-portal). |
 | `AADSTS65001` (consent required) | First-time sign-in — accept the consent. If admin consent is required for the well-known Azure CLI app in Tenant A, ask the Tenant A admin to consent. |
 | `Missing credentials. Please pass an api_key, …` | The [Vendored SDK note](#vendored-sdk-note) edit was lost. Restore `api_key="not-used"`. |
-| `(401) Authorization failed` from Azure OpenAI (orchestrator only) | The signed-in user doesn't have **Cognitive Services OpenAI User** role on the AOAI resource. See [AOAI RBAC](https://learn.microsoft.com/azure/ai-services/openai/how-to/role-based-access-control). |
-| `404 DeploymentNotFound` from Azure OpenAI (orchestrator only) | `AZURE_OPENAI_DEPLOYMENT` doesn't match a deployment in your AOAI resource. Check Azure AI Foundry → Deployments. |
+| `(401) Authorization failed` from Azure AI Foundry (orchestrator only) | The signed-in user doesn't have a role that grants chat-completion access on the Foundry resource (e.g. **Azure AI User** / **Cognitive Services User**). See [Azure AI services RBAC](https://learn.microsoft.com/azure/ai-services/role-based-access-control). |
+| `404 DeploymentNotFound` from Azure AI Foundry (orchestrator only) | `AZURE_OPENAI_DEPLOYMENT` doesn't match a deployment on your Foundry resource, or `AZURE_OPENAI_ENDPOINT` doesn't end with `/openai/v1`. Check Azure AI Foundry → Deployments. |
 | `HTTP 403` from the Fabric Data Agent | Your guest account doesn't have **read** access to the data source bound to the Fabric Data Agent, or isn't on the workspace. |
 | `HTTP 404` on `…/threads/fabric` | Wrong `DATA_AGENT_URL`. It must end with `/aiassistant/openai`. Re-copy from Fabric → Data Agent → Published endpoint. |
 | Browser doesn't open at all | You're running Streamlit on a remote/headless host. Swap `InteractiveBrowserCredential` for [`DeviceCodeCredential`](https://learn.microsoft.com/python/api/azure-identity/azure.identity.devicecodecredential) in `fabric_data_agent_client.py`. |
@@ -725,7 +728,7 @@ See:
 - [Microsoft Agent Framework — overview](https://learn.microsoft.com/agent-framework/overview/agent-framework-overview)
 - [Microsoft Agent Framework — Agent with tools](https://learn.microsoft.com/agent-framework/user-guide/agents/agent-with-tools)
 - [Microsoft Agent Framework — Multi-agent workflows](https://learn.microsoft.com/agent-framework/user-guide/workflows/overview)
-- [Azure OpenAI — Entra ID role-based access control](https://learn.microsoft.com/azure/ai-services/openai/how-to/role-based-access-control)
+- [Azure AI services — Entra ID role-based access control](https://learn.microsoft.com/azure/ai-services/role-based-access-control)
 - [Microsoft Fabric preview features](https://learn.microsoft.com/fabric/fundamentals/preview) — preview terms.
 
 ---

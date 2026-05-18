@@ -25,7 +25,6 @@ _ENV_VARS = (
     "DATA_AGENT_URL",
     "AZURE_OPENAI_ENDPOINT",
     "AZURE_OPENAI_DEPLOYMENT",
-    "AZURE_OPENAI_API_VERSION",
 )
 
 
@@ -39,27 +38,20 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_config_from_env_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TENANT_ID", "tenant-a")
     monkeypatch.setenv("DATA_AGENT_URL", "https://example/openai")
-    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://aoai.example")
-    monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
-    monkeypatch.setenv("AZURE_OPENAI_API_VERSION", "2025-04-01-preview")
+    monkeypatch.setenv(
+        "AZURE_OPENAI_ENDPOINT",
+        "https://foundry.example.services.ai.azure.com/openai/v1",
+    )
+    monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5.4-mini")
 
     cfg = OrchestratorConfig.from_env()
     assert cfg.tenant_id == "tenant-a"
     assert cfg.data_agent_url == "https://example/openai"
-    assert cfg.azure_openai_endpoint == "https://aoai.example"
-    assert cfg.azure_openai_deployment == "gpt-4o-mini"
-    assert cfg.azure_openai_api_version == "2025-04-01-preview"
-
-
-def test_config_from_env_uses_default_api_version(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TENANT_ID", "tenant-a")
-    monkeypatch.setenv("DATA_AGENT_URL", "https://example/openai")
-    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://aoai.example")
-    monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
-    cfg = OrchestratorConfig.from_env()
-    assert cfg.azure_openai_api_version == "2024-12-01-preview"
+    assert (
+        cfg.azure_openai_endpoint
+        == "https://foundry.example.services.ai.azure.com/openai/v1"
+    )
+    assert cfg.azure_openai_deployment == "gpt-5.4-mini"
 
 
 def test_config_from_env_reports_all_missing(
@@ -96,9 +88,8 @@ def _make_config() -> OrchestratorConfig:
     return OrchestratorConfig(
         tenant_id="tenant-a",
         data_agent_url="https://example/openai",
-        azure_openai_endpoint="https://aoai.example",
-        azure_openai_deployment="gpt-4o-mini",
-        azure_openai_api_version="2024-12-01-preview",
+        azure_openai_endpoint="https://foundry.example.services.ai.azure.com/openai/v1",
+        azure_openai_deployment="gpt-5.4-mini",
     )
 
 
