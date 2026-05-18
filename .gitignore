@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 
+# MSAL token cache lokal (berisi access / refresh token user — sensitif)
+.msal_cache.bin
+**/.msal_cache.bin
+
 # Python
 __pycache__/
 *.py[cod]

@@ -1,0 +1,12 @@
+# Fabric Cross-Tenant Demo — Python client SDK approach
+# Per: https://learn.microsoft.com/en-us/fabric/data-science/consume-data-agent-python
+#
+# `fabric_data_agent_client.py` is copied verbatim from
+# https://github.com/microsoft/fabric_data_agent_client (MIT licensed).
+# Its runtime dependencies are azure-identity, openai, requests, python-dotenv.
+
+streamlit>=1.40
+azure-identity>=1.15.0
+openai>=1.0.0
+requests>=2.32
+python-dotenv>=1.0.0
