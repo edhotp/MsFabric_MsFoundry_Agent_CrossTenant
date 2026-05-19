@@ -26,6 +26,10 @@ The implementation follows the official Microsoft Learn pattern:
 ## Table of contents
 
 - [Pick your demo](#pick-your-demo)
+- [Ways to consume a Fabric Data Agent](#ways-to-consume-a-fabric-data-agent)
+  - [The six official consumption patterns](#the-six-official-consumption-patterns)
+  - [Decision tree — which pattern should I use?](#decision-tree--which-pattern-should-i-use)
+  - [Where these demos fit](#where-these-demos-fit)
 - [Repository layout](#repository-layout)
 - [Architecture](#architecture)
   - [Shared cross-tenant identity model](#shared-cross-tenant-identity-model)
@@ -57,6 +61,77 @@ The implementation follows the official Microsoft Learn pattern:
 
 Both demos can run side-by-side: the simple demo defaults to port **8501**,
 the orchestrator demo to port **8502**.
+
+---
+
+## Ways to consume a Fabric Data Agent
+
+Microsoft Learn currently documents **six** officially supported ways to
+consume a published Fabric Data Agent. The two demos in this repo are
+focused on the **Python client SDK** pattern (extended for cross-tenant
+and wrapped in a Microsoft Agent Framework manager agent), but the right
+choice depends on **who** is asking the questions and **where** they
+live. This section summarizes the trade-offs so you can pick the right
+pattern for *your* scenario.
+
+### The six official consumption patterns
+
+| # | Pattern | Best for | Tenant model | Key constraint |
+|---|---|---|---|---|
+| 1 | **[Microsoft Foundry — Azure AI Agent Service](https://learn.microsoft.com/fabric/data-science/data-agent-foundry)** | Building an Azure AI agent in Foundry that uses Fabric as a knowledge tool (`FabricTool`). Identity-passthrough (OBO) is built in. | **Same tenant only** — Fabric and Foundry must share the tenant and the signed-in account. | Only **one** Fabric Data Agent can be attached as a knowledge source per Azure AI agent. Requires `AI Developer` RBAC role in Foundry. |
+| 2 | **[Copilot in Power BI](https://learn.microsoft.com/fabric/data-science/data-agent-copilot-powerbi)** | Power BI analysts asking ad-hoc questions inside a report or from the standalone Copilot pane. Zero code. | Same tenant. | Discovery-only experience — Copilot ranks the agent against semantic models and reports; you can also attach a specific Data Agent manually. |
+| 3 | **[Microsoft Copilot Studio](https://learn.microsoft.com/fabric/data-science/data-agent-microsoft-copilot-studio)** | Low-code makers building a custom AI agent to deploy on Teams, websites, or Microsoft 365 Copilot — adds Fabric as a **connected agent**. | Same tenant; requires generative orchestration **on**. | Requires Microsoft 365 Copilot license + per-user license. Auth can be **User** or **Agent author**. |
+| 4 | **[Python client SDK](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python)** *(this repo's pattern)* | Custom web apps, Streamlit/Flask UIs, scripts, or wrapping the Data Agent as a tool inside a Microsoft Agent Framework / Semantic Kernel agent. **Full UX control.** | Works **same-tenant** *and* **cross-tenant** (use a tenant-scoped `InteractiveBrowserCredential` per resource — see [demo-orchestrator/orchestrator.py](demo-orchestrator/orchestrator.py)). | User identity only — Service Principal Name (SPN) auth for the Data Agent endpoint itself is in preview and not covered by the SDK sample. |
+| 5 | **[Microsoft 365 Copilot](https://learn.microsoft.com/fabric/data-science/data-agent-microsoft-365-copilot)** | Enterprise end-users in Teams / Outlook / the Copilot chat — publish the Data Agent to the **Agent Store** and let users `@mention` it. | Same tenant. | Requires Microsoft 365 Copilot license; M365 Copilot's own orchestrator will reason over / reshape the answer (configurable via the publishing description). |
+| 6 | **[Fabric Data Agent as MCP server](https://learn.microsoft.com/fabric/data-science/data-agent-mcp-server)** | Developers and data scientists working in **VS Code** (GitHub Copilot Agent Mode) or any Model Context Protocol client. Plug it in via `mcp.json`. | Tenant-agnostic from the client side, but the user must sign in to the tenant that hosts the Data Agent. | Currently officially supported in **VS Code**; the agent is exposed as a single MCP tool — the **publishing description becomes the tool description**, so write it carefully. |
+
+### Decision tree — which pattern should I use?
+
+The quickest way to land on the right pattern is to answer two questions:
+**(1) is the consumer in the same Entra tenant as Fabric?** and
+**(2) who is the end user?**
+
+```mermaid
+flowchart TD
+    Start(["Need to consume a published<br/>Fabric Data Agent"]) --> Q1{"Is the consumer in the<br/>SAME Entra tenant as Fabric?"}
+
+    Q1 -- "No — cross-tenant" --> Python["Python client SDK<br/>InteractiveBrowserCredential per tenant<br/>optionally inside a manager agent"]:::repo
+    Q1 -- "Yes — same tenant" --> Q2{"Who is the end user?"}
+
+    Q2 -- "Power BI analyst<br/>working inside a report" --> PBI["Copilot in Power BI"]
+    Q2 -- "Enterprise user in<br/>Teams / Outlook / M365 chat" --> M365["Microsoft 365 Copilot<br/>publish to Agent Store"]
+    Q2 -- "Developer building<br/>an app or agent" --> Q3{"What kind of agent or app<br/>are you building?"}
+
+    Q3 -- "Azure AI agent in Foundry<br/>with OBO passthrough" --> Foundry["Microsoft Foundry<br/>Azure AI Agent Service<br/>FabricTool"]
+    Q3 -- "Low-code agent for<br/>Teams / website / M365" --> CS["Microsoft Copilot Studio<br/>connected agent"]
+    Q3 -- "VS Code or any MCP client<br/>for dev or data-science workflows" --> MCP["Fabric Data Agent<br/>as MCP server"]
+    Q3 -- "Custom web UI / API<br/>with full UX control" --> Python
+
+    classDef repo fill:#0078D4,color:#fff,stroke:#005A9E,stroke-width:2px
+```
+
+> The blue node is the pattern implemented by this repository.
+
+### Where these demos fit
+
+Both demos in this repo implement **pattern #4 — the Python client SDK**,
+but they cover two different sub-scenarios on the decision tree:
+
+- **[demo/](demo/)** is the *minimal* SDK reference. One credential, one
+  tenant, no LLM in the middle — useful when you want to verify the
+  cross-tenant sign-in path or embed the Data Agent answer directly into
+  your own UI.
+- **[demo-orchestrator/](demo-orchestrator/)** extends pattern #4 with a
+  **Microsoft Agent Framework manager agent** that uses **two**
+  `InteractiveBrowserCredential` instances — one for Fabric in Tenant A,
+  one for Azure AI Foundry in the home (or `LLM_TENANT_ID`) tenant. This
+  is the pattern to copy when Fabric and your LLM live in **different**
+  Entra tenants, which the other five patterns currently don't support.
+
+If your scenario matches a different leaf of the decision tree (Foundry
+same-tenant, Power BI, Copilot Studio, M365 Copilot, or MCP), follow the
+Microsoft Learn link in the table above — those flows are fully UI-driven
+and don't need the code in this repo.
 
 ---
 
@@ -772,16 +847,33 @@ See:
 
 ## Microsoft Learn references
 
-- [Consume a Fabric data agent with the Python client SDK (preview)](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python) — the pattern these demos implement.
+**Fabric Data Agent — consumption patterns** (the six options compared in
+[Ways to consume a Fabric Data Agent](#ways-to-consume-a-fabric-data-agent)):
+
+- [Consume a Fabric data agent with the Python client SDK (preview)](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python) — pattern #4, the one these demos implement.
+- [Consume Fabric data agent from Microsoft Foundry Services (preview)](https://learn.microsoft.com/fabric/data-science/data-agent-foundry) — pattern #1, `FabricTool` in Azure AI Agent Service.
+- [Consume a Fabric data agent from Copilot in Power BI (preview)](https://learn.microsoft.com/fabric/data-science/data-agent-copilot-powerbi) — pattern #2.
+- [Consume a Fabric Data Agent in Microsoft Copilot Studio (preview)](https://learn.microsoft.com/fabric/data-science/data-agent-microsoft-copilot-studio) — pattern #3, connected agents.
+- [Consume Fabric data agent in Microsoft 365 Copilot (preview)](https://learn.microsoft.com/fabric/data-science/data-agent-microsoft-365-copilot) — pattern #5, Agent Store publishing.
+- [Consume Fabric data agent as a Model Context Protocol server (preview)](https://learn.microsoft.com/fabric/data-science/data-agent-mcp-server) — pattern #6, MCP in VS Code.
+
+**Fabric Data Agent — fundamentals:**
+
 - [Fabric data agent concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) — what a Fabric Data Agent is and how it authenticates as the calling user.
 - [Fabric data agent tenant settings](https://learn.microsoft.com/fabric/data-science/data-agent-tenant-settings) — cross-geo / cross-tenant prerequisites.
+- [Microsoft Fabric preview features](https://learn.microsoft.com/fabric/fundamentals/preview) — preview terms.
+
+**Identity, tenants, and RBAC:**
+
 - [`azure.identity.InteractiveBrowserCredential`](https://learn.microsoft.com/python/api/azure-identity/azure.identity.interactivebrowsercredential) — the credential used for sign-in.
 - [Microsoft Entra B2B collaboration overview](https://learn.microsoft.com/entra/external-id/what-is-b2b) — how a Tenant B user can sign in to Tenant A as a guest.
+- [Azure AI services — Entra ID role-based access control](https://learn.microsoft.com/azure/ai-services/role-based-access-control)
+
+**Microsoft Agent Framework (orchestrator demo):**
+
 - [Microsoft Agent Framework — overview](https://learn.microsoft.com/agent-framework/overview/agent-framework-overview)
 - [Microsoft Agent Framework — Agent with tools](https://learn.microsoft.com/agent-framework/user-guide/agents/agent-with-tools)
 - [Microsoft Agent Framework — Multi-agent workflows](https://learn.microsoft.com/agent-framework/user-guide/workflows/overview)
-- [Azure AI services — Entra ID role-based access control](https://learn.microsoft.com/azure/ai-services/role-based-access-control)
-- [Microsoft Fabric preview features](https://learn.microsoft.com/fabric/fundamentals/preview) — preview terms.
 
 ---
 

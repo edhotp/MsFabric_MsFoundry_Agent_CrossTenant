@@ -27,6 +27,10 @@ Implementasi mengikuti pola resmi dari Microsoft Learn:
 ## Daftar isi
 
 - [Pilih demo Anda](#pilih-demo-anda)
+- [Cara mengonsumsi Fabric Data Agent](#cara-mengonsumsi-fabric-data-agent)
+  - [Enam pola konsumsi resmi](#enam-pola-konsumsi-resmi)
+  - [Decision tree — pola mana yang harus saya pakai?](#decision-tree--pola-mana-yang-harus-saya-pakai)
+  - [Posisi kedua demo ini](#posisi-kedua-demo-ini)
 - [Tata letak repositori](#tata-letak-repositori)
 - [Arsitektur](#arsitektur)
   - [Model identitas cross-tenant bersama](#model-identitas-cross-tenant-bersama)
@@ -58,6 +62,79 @@ Implementasi mengikuti pola resmi dari Microsoft Learn:
 
 Kedua demo dapat berjalan berdampingan: demo sederhana default di port
 **8501**, demo orchestrator di port **8502**.
+
+---
+
+## Cara mengonsumsi Fabric Data Agent
+
+Microsoft Learn saat ini mendokumentasikan **enam** cara resmi untuk
+mengonsumsi Fabric Data Agent yang sudah dipublikasikan. Kedua demo di
+repositori ini berfokus pada pola **Python client SDK** (diperluas untuk
+skenario cross-tenant dan dibungkus di dalam manager agent Microsoft
+Agent Framework), tetapi pilihan yang tepat tergantung pada **siapa**
+yang bertanya dan **di mana** mereka berada. Bagian ini merangkum
+trade-off-nya agar Anda dapat memilih pola yang tepat untuk skenario
+*Anda*.
+
+### Enam pola konsumsi resmi
+
+| # | Pola | Cocok untuk | Model tenant | Batasan utama |
+|---|---|---|---|---|
+| 1 | **[Microsoft Foundry — Azure AI Agent Service](https://learn.microsoft.com/fabric/data-science/data-agent-foundry)** | Membangun Azure AI agent di Foundry yang memakai Fabric sebagai knowledge tool (`FabricTool`). Identity-passthrough (OBO) sudah built-in. | **Harus satu tenant** — Fabric dan Foundry wajib di tenant dan akun yang sama. | Hanya **satu** Fabric Data Agent yang dapat dilampirkan sebagai knowledge source per Azure AI agent. Butuh peran RBAC `AI Developer` di Foundry. |
+| 2 | **[Copilot di Power BI](https://learn.microsoft.com/fabric/data-science/data-agent-copilot-powerbi)** | Analis Power BI yang bertanya ad-hoc di dalam report atau dari standalone Copilot pane. Tanpa kode. | Satu tenant. | Pengalaman berbasis discovery — Copilot meranking agent terhadap semantic model & report; Anda juga dapat memasang Data Agent tertentu secara manual. |
+| 3 | **[Microsoft Copilot Studio](https://learn.microsoft.com/fabric/data-science/data-agent-microsoft-copilot-studio)** | Maker low-code yang membangun AI agent kustom untuk Teams, website, atau Microsoft 365 Copilot — menambahkan Fabric sebagai **connected agent**. | Satu tenant; generative orchestration **harus aktif**. | Butuh lisensi Microsoft 365 Copilot + lisensi per-user. Auth dapat berupa **User** atau **Agent author**. |
+| 4 | **[Python client SDK](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python)** *(pola repo ini)* | Web app kustom, UI Streamlit/Flask, script, atau membungkus Data Agent sebagai tool di dalam agent Microsoft Agent Framework / Semantic Kernel. **Kontrol UX penuh.** | Berfungsi **satu-tenant** *dan* **cross-tenant** (pakai `InteractiveBrowserCredential` yang di-scope per tenant untuk masing-masing resource — lihat [demo-orchestrator/orchestrator.py](demo-orchestrator/orchestrator.py)). | Hanya autentikasi identitas user — Service Principal Name (SPN) untuk endpoint Data Agent itu sendiri masih preview dan tidak dicakup oleh sample SDK. |
+| 5 | **[Microsoft 365 Copilot](https://learn.microsoft.com/fabric/data-science/data-agent-microsoft-365-copilot)** | End-user enterprise di Teams / Outlook / Copilot chat — publish Data Agent ke **Agent Store** lalu user `@mention` agent-nya. | Satu tenant. | Butuh lisensi Microsoft 365 Copilot; orchestrator M365 Copilot akan tetap me-reason / membentuk ulang jawaban (dapat diarahkan via deskripsi saat publish). |
+| 6 | **[Fabric Data Agent sebagai MCP server](https://learn.microsoft.com/fabric/data-science/data-agent-mcp-server)** | Developer & data scientist yang bekerja di **VS Code** (GitHub Copilot Agent Mode) atau MCP client lain. Plug-in via `mcp.json`. | Tenant-agnostic dari sisi client, tapi user wajib sign-in ke tenant yang meng-host Data Agent. | Saat ini didukung resmi di **VS Code**; agent diekspos sebagai satu MCP tool — **deskripsi publish menjadi deskripsi tool**, jadi tulis dengan hati-hati. |
+
+### Decision tree — pola mana yang harus saya pakai?
+
+Cara tercepat menentukan pola yang tepat adalah dengan menjawab dua
+pertanyaan: **(1) apakah consumer berada di tenant Entra yang sama dengan
+Fabric?** dan **(2) siapa end-user-nya?**
+
+```mermaid
+flowchart TD
+    Start(["Perlu mengonsumsi<br/>Fabric Data Agent yang sudah dipublish"]) --> Q1{"Apakah consumer berada di tenant Entra<br/>yang SAMA dengan Fabric?"}
+
+    Q1 -- "Tidak — cross-tenant" --> Python["Python client SDK<br/>InteractiveBrowserCredential per tenant<br/>opsional di dalam manager agent"]:::repo
+    Q1 -- "Ya — satu tenant" --> Q2{"Siapa end-user-nya?"}
+
+    Q2 -- "Analis Power BI<br/>di dalam report" --> PBI["Copilot di Power BI"]
+    Q2 -- "User enterprise di<br/>Teams / Outlook / M365 chat" --> M365["Microsoft 365 Copilot<br/>publish ke Agent Store"]
+    Q2 -- "Developer yang membangun<br/>app atau agent" --> Q3{"Jenis agent atau app apa<br/>yang Anda bangun?"}
+
+    Q3 -- "Azure AI agent di Foundry<br/>dengan OBO passthrough" --> Foundry["Microsoft Foundry<br/>Azure AI Agent Service<br/>FabricTool"]
+    Q3 -- "Agent low-code untuk<br/>Teams / web / M365" --> CS["Microsoft Copilot Studio<br/>connected agent"]
+    Q3 -- "VS Code atau MCP client apa pun<br/>untuk workflow dev / data-science" --> MCP["Fabric Data Agent<br/>sebagai MCP server"]
+    Q3 -- "Web UI / API kustom<br/>dengan kontrol UX penuh" --> Python
+
+    classDef repo fill:#0078D4,color:#fff,stroke:#005A9E,stroke-width:2px
+```
+
+> Node biru adalah pola yang diimplementasikan repositori ini.
+
+### Posisi kedua demo ini
+
+Kedua demo di repo ini mengimplementasikan **pola #4 — Python client
+SDK**, tetapi mencakup dua sub-skenario berbeda pada decision tree:
+
+- **[demo/](demo/)** adalah referensi SDK *minimal*. Satu credential,
+  satu tenant, tanpa LLM di tengah — berguna saat Anda ingin
+  memverifikasi jalur sign-in cross-tenant atau menyematkan jawaban Data
+  Agent langsung ke UI Anda sendiri.
+- **[demo-orchestrator/](demo-orchestrator/)** memperluas pola #4 dengan
+  **manager agent Microsoft Agent Framework** yang memakai **dua**
+  instance `InteractiveBrowserCredential` — satu untuk Fabric di Tenant
+  A, satu untuk Azure AI Foundry di tenant home (atau `LLM_TENANT_ID`).
+  Inilah pola yang harus Anda salin ketika Fabric dan LLM Anda berada di
+  tenant Entra **berbeda**, skenario yang saat ini belum didukung oleh
+  lima pola lainnya.
+
+Jika skenario Anda cocok dengan daun decision tree yang berbeda (Foundry
+satu-tenant, Power BI, Copilot Studio, M365 Copilot, atau MCP), ikuti
+link Microsoft Learn di tabel di atas — flow tersebut sepenuhnya berbasis
+UI dan tidak memerlukan kode dari repo ini.
 
 ---
 
@@ -788,16 +865,33 @@ Lihat:
 
 ## Referensi Microsoft Learn
 
-- [Consume a Fabric data agent with the Python client SDK (preview)](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python) — pola yang diimplementasi demo ini.
+**Fabric Data Agent — pola konsumsi** (enam opsi yang dibandingkan di
+[Cara mengonsumsi Fabric Data Agent](#cara-mengonsumsi-fabric-data-agent)):
+
+- [Consume a Fabric data agent with the Python client SDK (preview)](https://learn.microsoft.com/fabric/data-science/consume-data-agent-python) — pola #4, yang diimplementasi demo ini.
+- [Consume Fabric data agent from Microsoft Foundry Services (preview)](https://learn.microsoft.com/fabric/data-science/data-agent-foundry) — pola #1, `FabricTool` di Azure AI Agent Service.
+- [Consume a Fabric data agent from Copilot in Power BI (preview)](https://learn.microsoft.com/fabric/data-science/data-agent-copilot-powerbi) — pola #2.
+- [Consume a Fabric Data Agent in Microsoft Copilot Studio (preview)](https://learn.microsoft.com/fabric/data-science/data-agent-microsoft-copilot-studio) — pola #3, connected agents.
+- [Consume Fabric data agent in Microsoft 365 Copilot (preview)](https://learn.microsoft.com/fabric/data-science/data-agent-microsoft-365-copilot) — pola #5, publish ke Agent Store.
+- [Consume Fabric data agent as a Model Context Protocol server (preview)](https://learn.microsoft.com/fabric/data-science/data-agent-mcp-server) — pola #6, MCP di VS Code.
+
+**Fabric Data Agent — fundamental:**
+
 - [Konsep Fabric data agent](https://learn.microsoft.com/fabric/data-science/concept-data-agent) — apa itu Fabric Data Agent dan bagaimana ia mengautentikasi sebagai user pemanggil.
 - [Fabric data agent tenant settings](https://learn.microsoft.com/fabric/data-science/data-agent-tenant-settings) — prasyarat cross-geo / cross-tenant.
+- [Microsoft Fabric preview features](https://learn.microsoft.com/fabric/fundamentals/preview) — ketentuan preview.
+
+**Identitas, tenant, dan RBAC:**
+
 - [`azure.identity.InteractiveBrowserCredential`](https://learn.microsoft.com/python/api/azure-identity/azure.identity.interactivebrowsercredential) — credential yang dipakai untuk sign-in.
 - [Microsoft Entra B2B collaboration overview](https://learn.microsoft.com/entra/external-id/what-is-b2b) — bagaimana user Tenant B dapat sign-in ke Tenant A sebagai guest.
+- [Azure AI services — Entra ID role-based access control](https://learn.microsoft.com/azure/ai-services/role-based-access-control)
+
+**Microsoft Agent Framework (demo orchestrator):**
+
 - [Microsoft Agent Framework — overview](https://learn.microsoft.com/agent-framework/overview/agent-framework-overview)
 - [Microsoft Agent Framework — Agent with tools](https://learn.microsoft.com/agent-framework/user-guide/agents/agent-with-tools)
 - [Microsoft Agent Framework — Multi-agent workflows](https://learn.microsoft.com/agent-framework/user-guide/workflows/overview)
-- [Azure AI services — Entra ID role-based access control](https://learn.microsoft.com/azure/ai-services/role-based-access-control)
-- [Microsoft Fabric preview features](https://learn.microsoft.com/fabric/fundamentals/preview) — ketentuan preview.
 
 ---
 
